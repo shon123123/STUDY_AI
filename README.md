@@ -21,3 +21,7 @@ An intelligent study companion powered by **Llama 3.2 3B Instruct** for personal
 ### Installation
 
 1. **Clone the repository**
+2. Run the backend with thhe command "python main.py"
+3.Frontend "npm run dev"
+
+
