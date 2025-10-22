@@ -1,0 +1,36 @@
+{
+  "name": "ai-study-assistant-frontend",
+  "version": "1.0.0",
+  "description": "Frontend for AI Study Assistant with modern dashboard UI",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3001",
+    "build": "next build",
+    "start": "next start -p 3001",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@headlessui/react": "1.7.0",
+    "@heroicons/react": "2.0.0",
+    "@types/node": "20.8.0",
+    "@types/react": "18.2.0",
+    "@types/react-dom": "18.2.0",
+    "ai-study-assistant-frontend": "file:",
+    "autoprefixer": "10.4.0",
+    "axios": "1.5.0",
+    "framer-motion": "10.16.0",
+    "lucide-react": "0.290.0",
+    "next": "14.0.0",
+    "postcss": "8.4.0",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "react-query": "3.39.0",
+    "recharts": "2.8.0",
+    "tailwindcss": "3.3.0",
+    "typescript": "^5.0.0"
+  },
+  "devDependencies": {
+    "eslint": "8.51.0",
+    "eslint-config-next": "14.0.0"
+  }
+}

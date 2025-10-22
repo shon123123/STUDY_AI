@@ -1,0 +1,7 @@
+{
+  "/page": "app/page.js",
+  "/overview/page": "app/overview/page.js",
+  "/materials/page": "app/materials/page.js",
+  "/planner/page": "app/planner/page.js",
+  "/settings/page": "app/settings/page.js"
+}
