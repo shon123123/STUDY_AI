@@ -1,8 +1,8 @@
-// File: C:\Users\shonp\study-assistant-app\STUDY-ASSISTANT-APP\frontend\app\settings\page.tsx
-import * as entry from '../../../../app/settings/page.js'
+// File: C:\Users\shonp\OneDrive\Documents\GitHub\STUDY_AI\frontend\app\ai-assistant\page.tsx
+import * as entry from '../../../../app/ai-assistant/page.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 
-type TEntry = typeof import('../../../../app/settings/page.js')
+type TEntry = typeof import('../../../../app/ai-assistant/page.js')
 
 // Check that the entry is a valid entry
 checkFields<Diff<{

@@ -197,10 +197,10 @@ export default function InsightsPage() {
 
   const getInsightColor = (type: string) => {
     const colors = {
-      strength: 'bg-green-50 border-green-200',
-      weakness: 'bg-red-50 border-red-200', 
-      recommendation: 'bg-blue-50 border-blue-200',
-      achievement: 'bg-yellow-50 border-yellow-200'
+      strength: 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800',
+      weakness: 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800', 
+      recommendation: 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800',
+      achievement: 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800'
     }
     return colors[type as keyof typeof colors] || colors.recommendation
   }
@@ -310,19 +310,28 @@ export default function InsightsPage() {
 
                 <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
                   <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">🎯 Knowledge Gap Analysis</h3>
-                  {predictiveAnalysis?.knowledge_gaps.map((gap, index) => (
-                    <div key={index} className="mb-3 p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg border border-orange-200 dark:border-orange-800">
-                      <div className="font-medium text-orange-800 dark:text-orange-200">{gap}</div>
-                      <div className="text-sm text-orange-600 dark:text-orange-400 mt-1">
-                        Recommended action: Focus study sessions on this area
-                      </div>
+                  {predictiveAnalysis?.knowledge_gaps && predictiveAnalysis.knowledge_gaps.length > 0 ? (
+                    <div className="space-y-3">
+                      {predictiveAnalysis.knowledge_gaps.map((gap, index) => (
+                        <div key={index} className="p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg border border-orange-200 dark:border-orange-800">
+                          <div className="font-medium text-orange-800 dark:text-orange-200">{gap}</div>
+                          <div className="text-sm text-orange-600 dark:text-orange-400 mt-1">
+                            Recommended action: Focus study sessions on this area
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  ) : (
+                    <div className="text-center py-8">
+                      <p className="text-gray-500 dark:text-gray-400">Upload more study materials to expand your knowledge base</p>
+                      <p className="text-sm text-orange-600 dark:text-orange-400 mt-2">Recommended action: Focus study sessions on this area</p>
+                    </div>
+                  )}
                 </div>
               </div>
 
               {/* AI-Generated Insights */}
-              <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+              <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6 mb-8">
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-6">🤖 AI Learning Insights</h3>
                 
                 {learningInsights.length > 0 ? (
@@ -332,15 +341,15 @@ export default function InsightsPage() {
                         <div className="flex items-start space-x-3">
                           <div className="text-2xl">{getInsightIcon(insight.type)}</div>
                           <div className="flex-1">
-                            <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-2">{insight.title}</h4>
+                            <h4 className="font-semibold text-gray-900 dark:text-white mb-2">{insight.title}</h4>
                             <p className="text-sm text-gray-700 dark:text-gray-300 mb-3">{insight.description}</p>
                             
                             <div className="flex items-center justify-between">
-                              <div className="text-xs text-gray-500 dark:text-gray-400">
+                              <div className="text-xs text-gray-600 dark:text-gray-400">
                                 Confidence: {Math.round(insight.confidence * 100)}%
                               </div>
                               {insight.actionable && insight.action && (
-                                <button className="text-xs bg-blue-600 dark:bg-blue-700 text-white px-2 py-1 rounded hover:bg-blue-700 dark:hover:bg-blue-600">
+                                <button className="text-xs bg-blue-600 dark:bg-blue-500 text-white px-3 py-1.5 rounded-md hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors">
                                   {insight.action}
                                 </button>
                               )}
@@ -353,8 +362,8 @@ export default function InsightsPage() {
                 ) : (
                   <div className="text-center py-8">
                     <div className="text-4xl mb-4">🧠</div>
-                    <p className="text-gray-500 dark:text-gray-400">Complete more quizzes to unlock AI insights</p>
-                    <p className="text-gray-400 dark:text-gray-500 text-sm mt-2">Our AI needs learning data to provide personalized recommendations</p>
+                    <p className="text-gray-600 dark:text-gray-400 font-medium">Complete more quizzes to unlock AI insights</p>
+                    <p className="text-gray-500 dark:text-gray-500 text-sm mt-2">Our AI needs learning data to provide personalized recommendations</p>
                   </div>
                 )}
               </div>

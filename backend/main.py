@@ -7,6 +7,22 @@ import uvicorn
 import logging
 from datetime import datetime, timedelta
 import uuid
+from bson import ObjectId
+
+# Comprehensive recursive serialization function for MongoDB documents
+def serialize_value(value):
+    """Recursively serialize any value, converting ObjectId and datetime to strings"""
+    if value is None:
+        return None
+    if isinstance(value, ObjectId):
+        return str(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {k: serialize_value(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [serialize_value(item) for item in value]
+    return value
 
 # Simple imports without complex dependencies
 try:
@@ -637,11 +653,12 @@ async def generate_flashcards_for_document(doc_id: str):
                 
                 logger.info(f"✅ Generated {len(flashcards)} flashcards for {doc['filename']}")
                 
+                # Serialize before returning
                 return {
                     "success": True,
                     "message": "Flashcards generated successfully",
                     "document_id": doc_id,
-                    "flashcards": flashcards,
+                    "flashcards": serialize_value(flashcards),
                     "total": len(flashcards)
                 }
             except Exception as e:
@@ -1891,9 +1908,10 @@ async def generate_flashcards(request: FlashcardGenerateRequest):
                 except Exception as e:
                     logger.warning(f"Failed to save flashcards to MongoDB: {e}")
             
+            # Serialize before returning
             return {
                 "success": True,
-                "flashcards": flashcards,
+                "flashcards": serialize_value(flashcards),
                 "total": len(flashcards),
                 "document_id": document_id
             }
@@ -1928,8 +1946,9 @@ async def get_due_flashcards():
             # Sort by difficulty (harder cards first) and review count (less reviewed first)
             due_cards.sort(key=lambda c: (-c['difficulty'], c['review_count']))
             
+            # Serialize before returning
             return {
-                "flashcards": due_cards,
+                "flashcards": serialize_value(due_cards),
                 "total_due": len(due_cards),
                 "total_cards": len(all_cards)
             }
@@ -1945,8 +1964,9 @@ async def get_due_flashcards():
     # Sort by difficulty (harder cards first) and review count (less reviewed first)
     due_cards.sort(key=lambda c: (-c['difficulty'], c['review_count']))
     
+    # Serialize before returning
     return {
-        "flashcards": due_cards,
+        "flashcards": serialize_value(due_cards),
         "total_due": len(due_cards),
         "total_cards": len(flashcards_store)
     }

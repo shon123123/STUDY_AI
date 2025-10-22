@@ -1,3 +1,69 @@
+from fastapi import Request
+# Endpoint to generate flashcards for a document (for frontend compatibility)
+@router.post("/flashcards/generate")
+async def generate_flashcards_api(request: Request):
+    """
+    Generate flashcards for a document by document_id (expects JSON: {"document_id": ...})
+    """
+    try:
+        data = await request.json()
+        document_id = data.get("document_id")
+        if not document_id:
+            raise HTTPException(status_code=400, detail="Missing document_id")
+        # Call the existing logic
+        return await generate_flashcards_from_document(document_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in /flashcards/generate: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to generate flashcards")
+from bson import ObjectId
+from datetime import datetime
+
+# Comprehensive recursive serialization function
+def serialize_value(value):
+    """Recursively serialize any value, converting ObjectId and datetime to strings"""
+    if value is None:
+        return None
+    if isinstance(value, ObjectId):
+        return str(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {k: serialize_value(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [serialize_value(item) for item in value]
+    return value
+
+# Helper function to serialize MongoDB documents
+def serialize_doc(doc):
+    if not doc:
+        return doc
+    return serialize_value(dict(doc))
+# Endpoint to get all due flashcards (for demo, returns all flashcards for all documents)
+@router.get("/flashcards/due")
+async def get_due_flashcards():
+    """
+    Return all flashcards for all documents (simulate 'due' logic).
+    """
+    try:
+        db = await get_database()
+        documents_collection = db.documents
+        cursor = documents_collection.find({"flashcards": {"$exists": True, "$ne": []}})
+        documents = await cursor.to_list(length=None)
+        due_flashcards = []
+        for doc in documents:
+            doc = serialize_doc(doc)
+            doc_id = doc.get("_id") or doc.get("id", "")
+            for card in doc.get("flashcards", []):
+                # Add document id to each card for reference
+                card_copy = dict(card)
+                card_copy["document_id"] = doc_id
+                due_flashcards.append(card_copy)
+        return {"flashcards": due_flashcards}
+    except Exception as e:
+        logger.error(f"Error fetching due flashcards: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to fetch due flashcards")
 # Document Upload and Processing API Routes
 # Handles file uploads, content extraction, and AI analysis
 
@@ -323,7 +389,13 @@ async def generate_flashcards_from_document(
         db = await get_database()
         documents_collection = db.documents
         
-        doc = await documents_collection.find_one({"_id": document_id})
+        # Always use ObjectId for MongoDB queries
+        from bson import ObjectId as BsonObjectId
+        try:
+            mongo_id = BsonObjectId(document_id)
+        except Exception:
+            mongo_id = document_id
+        doc = await documents_collection.find_one({"_id": mongo_id})
         
         if not doc:
             raise HTTPException(
@@ -339,10 +411,13 @@ async def generate_flashcards_from_document(
         
         # Check if flashcards already exist
         if doc.get("flashcards") and len(doc.get("flashcards", [])) > 0:
+            # Serialize the flashcards
+            flashcards = serialize_value(doc.get("flashcards", []))
             return {
                 "message": "Flashcards already exist",
                 "document_id": document_id,
-                "flashcards": doc.get("flashcards", [])
+                "flashcards": flashcards,
+                "total": len(flashcards)
             }
         
         # Generate flashcards using LLaMA
@@ -370,17 +445,20 @@ async def generate_flashcards_from_document(
         
         # Update document in MongoDB with flashcards
         await documents_collection.update_one(
-            {"_id": document_id},
+            {"_id": mongo_id},
             {"$set": {
                 "flashcards": flashcards,
                 "flashcard_count": len(flashcards)
             }}
         )
         
+        # Serialize the flashcards before returning
+        clean_flashcards = serialize_value(flashcards)
         return {
             "message": "Flashcards generated successfully",
             "document_id": document_id,
-            "flashcards": flashcards
+            "flashcards": clean_flashcards,
+            "total": len(clean_flashcards)
         }
         
     except HTTPException:

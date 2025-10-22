@@ -1,4 +1,4 @@
-// File: C:\Users\shonp\study-assistant-app\STUDY-ASSISTANT-APP\frontend\app\overview\page.tsx
+// File: C:\Users\shonp\OneDrive\Documents\GitHub\STUDY_AI\frontend\app\overview\page.tsx
 import * as entry from '../../../../app/overview/page.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 

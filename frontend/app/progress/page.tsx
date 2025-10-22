@@ -31,7 +31,7 @@ interface Achievement {
   progress: number
 }
 
-export default function ProgressPage() {
+export default function Progress() {
   const [timeframe, setTimeframe] = useState<'week' | 'month' | 'year'>('week')
   const [learningProgress, setLearningProgress] = useState<LearningProgress | null>(null)
   const [quizResults, setQuizResults] = useState<QuizResult[]>([])
@@ -260,9 +260,9 @@ export default function ProgressPage() {
 
   const getStrengthColor = (strength: string) => {
     const colors = {
-      high: 'text-green-600 bg-green-100',
-      medium: 'text-yellow-600 bg-yellow-100',
-      low: 'text-red-600 bg-red-100'
+      high: 'text-green-700 dark:text-green-400 bg-green-100 dark:bg-green-900/30',
+      medium: 'text-yellow-700 dark:text-yellow-400 bg-yellow-100 dark:bg-yellow-900/30',
+      low: 'text-red-700 dark:text-red-400 bg-red-100 dark:bg-red-900/30'
     }
     return colors[strength as keyof typeof colors] || colors.medium
   }
@@ -311,122 +311,117 @@ export default function ProgressPage() {
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-              <span className="ml-4 text-gray-600">Loading your progress analytics...</span>
+              <span className="ml-4 text-gray-600 dark:text-gray-400">Loading your progress analytics...</span>
             </div>
           ) : (
-            <>
+            <div>
               {/* Key Metrics */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-6 mb-8">
-            <div className="ai-card text-center">
-              <div className="text-3xl mb-2">⏱️</div>
-              <div className="text-2xl font-bold text-blue-600">{currentData.studyTime}h</div>
-              <div className="text-sm text-gray-600">Study Time</div>
-            </div>
-            
-            <div className="ai-card text-center">
-              <div className="text-3xl mb-2">🧠</div>
-              <div className="text-2xl font-bold text-green-600">{currentData.cardsReviewed}</div>
-              <div className="text-sm text-gray-600">Cards Reviewed</div>
-            </div>
-            
-            <div className="ai-card text-center">
-              <div className="text-3xl mb-2">❓</div>
-              <div className="text-2xl font-bold text-purple-600">{currentData.quizzesTaken}</div>
-              <div className="text-sm text-gray-600">Quizzes Taken</div>
-            </div>
-            
-            <div className="ai-card text-center">
-              <div className="text-3xl mb-2">🎯</div>
-              <div className="text-2xl font-bold text-orange-600">{currentData.averageScore}%</div>
-              <div className="text-sm text-gray-600">Avg Score</div>
-            </div>
-            
-            <div className="ai-card text-center">
-              <div className="text-3xl mb-2">🔥</div>
-              <div className="text-2xl font-bold text-red-600">{currentData.streak}</div>
-              <div className="text-sm text-gray-600">Day Streak</div>
-            </div>
-            
-            <div className="ai-card text-center">
-              <div className="text-3xl mb-2">📊</div>
-              <div className="text-2xl font-bold text-indigo-600">+{currentData.improvement}%</div>
-              <div className="text-sm text-gray-600">Improvement</div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* Study Streak Chart */}
-            <div className="lg:col-span-2">
-              <div className="ai-card">
-                <div className="ai-card-header">
-                  <h3 className="ai-card-title">📅 Weekly Study Pattern</h3>
+                <div className="ai-card dark:bg-gray-800 dark:border-gray-700 text-center">
+                  <div className="text-3xl mb-2">⏱️</div>
+                  <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{currentData.studyTime}h</div>
+                  <div className="text-sm text-gray-600 dark:text-gray-400">Study Time</div>
                 </div>
-                
-                <div className="space-y-4">
-                  <div className="flex justify-between items-end h-32 bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
-                    {studyStreak.map((day, index) => (
-                      <div key={index} className="flex flex-col items-center space-y-2">
-                        <div 
-                          className={`w-8 rounded-t ${day.completed ? 'bg-blue-500 dark:bg-blue-600' : 'bg-gray-300 dark:bg-gray-700'}`}
-                          style={{ height: `${Math.max(day.hours * 20, 8)}px` }}
-                        ></div>
-                        <span className="text-xs text-gray-600 dark:text-gray-400">{day.day}</span>
-                        <span className="text-xs font-medium text-gray-800 dark:text-gray-200">{day.hours}h</span>
-                      </div>
-                    ))}
-                  </div>
-                  
-                  <div className="text-center">
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      🎯 Goal: 2 hours per day • 
-                      <span className="text-green-600 dark:text-green-400 font-medium ml-1">5/7 days completed</span>
-                    </p>
-                  </div>
+                <div className="ai-card dark:bg-gray-800 dark:border-gray-700 text-center">
+                  <div className="text-3xl mb-2">🧠</div>
+                  <div className="text-2xl font-bold text-green-600 dark:text-green-400">{currentData.cardsReviewed}</div>
+                  <div className="text-sm text-gray-600 dark:text-gray-400">Cards Reviewed</div>
                 </div>
-              </div>
-            </div>
-
-            {/* Achievements */}
-            <div className="ai-card">
-              <div className="ai-card-header">
-                <h3 className="ai-card-title">🏆 Achievements</h3>
+                <div className="ai-card dark:bg-gray-800 dark:border-gray-700 text-center">
+                  <div className="text-3xl mb-2">❓</div>
+                  <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">{currentData.quizzesTaken}</div>
+                  <div className="text-sm text-gray-600 dark:text-gray-400">Quizzes Taken</div>
+                </div>
+                <div className="ai-card dark:bg-gray-800 dark:border-gray-700 text-center">
+                  <div className="text-3xl mb-2">🎯</div>
+                  <div className="text-2xl font-bold text-orange-600 dark:text-orange-400">{currentData.averageScore}%</div>
+                  <div className="text-sm text-gray-600 dark:text-gray-400">Avg Score</div>
+                </div>
+                <div className="ai-card dark:bg-gray-800 dark:border-gray-700 text-center">
+                  <div className="text-3xl mb-2">🔥</div>
+                  <div className="text-2xl font-bold text-red-600 dark:text-red-400">{currentData.streak}</div>
+                  <div className="text-sm text-gray-600 dark:text-gray-400">Day Streak</div>
+                </div>
+                <div className="ai-card dark:bg-gray-800 dark:border-gray-700 text-center">
+                  <div className="text-3xl mb-2">📊</div>
+                  <div className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">+{currentData.improvement}%</div>
+                  <div className="text-sm text-gray-600 dark:text-gray-400">Improvement</div>
+                </div>
               </div>
               
-              <div className="space-y-3">
-                {achievements.map((achievement) => (
-                  <div key={achievement.id} className={`p-3 rounded-lg border ${
-                    achievement.earned ? 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800' : 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700'
-                  }`}>
-                    <div className="flex items-center space-x-3">
-                      <div className="text-2xl">{achievement.icon}</div>
-                      <div className="flex-1">
-                        <h4 className="font-medium text-gray-900 dark:text-gray-100">{achievement.title}</h4>
-                        <p className="text-sm text-gray-600 dark:text-gray-400">{achievement.description}</p>
-                        {achievement.earned ? (
-                          <span className="text-xs text-yellow-600 dark:text-yellow-400">Earned {achievement.date}</span>
-                        ) : (
-                          <div className="mt-1">
-                            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5">
-                              <div 
-                                className="bg-blue-500 dark:bg-blue-600 h-1.5 rounded-full"
-                                style={{ width: `${achievement.progress}%` }}
-                              ></div>
-                            </div>
-                            <span className="text-xs text-gray-500 dark:text-gray-400">{achievement.progress}%</span>
-                          </div>
-                        )}
-                      </div>
+              <div className="flex flex-col lg:flex-row gap-8 mb-8">
+                {/* Study Streak Chart */}
+                <div className="flex-1 flex flex-col">
+                  <div className="ai-card dark:bg-gray-800 dark:border-gray-700 h-full flex flex-col">
+                    <div className="ai-card-header">
+                      <h3 className="ai-card-title dark:text-white">📅 Weekly Study Pattern</h3>
+                    </div>
+                <div className="flex-1 flex flex-col justify-between">
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-end h-32 bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
+                      {studyStreak.map((day, index) => (
+                        <div key={index} className="flex flex-col items-center space-y-2">
+                          <div 
+                            className={`w-8 rounded-t ${day.completed ? 'bg-blue-500 dark:bg-blue-600' : 'bg-gray-300 dark:bg-gray-700'}`}
+                            style={{ height: `${Math.max(day.hours * 20, 8)}px` }}
+                          ></div>
+                          <span className="text-xs text-gray-600 dark:text-gray-400">{day.day}</span>
+                          <span className="text-xs font-medium text-gray-800 dark:text-gray-200">{day.hours}h</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="text-center">
+                      <p className="text-sm text-gray-600 dark:text-gray-400">
+                        🎯 Goal: 2 hours per day • 
+                        <span className="text-green-600 dark:text-green-400 font-medium ml-1">5/7 days completed</span>
+                      </p>
                     </div>
                   </div>
-                ))}
+                </div>
               </div>
             </div>
-          </div>
+            {/* Achievements */}
+            <div className="w-full lg:w-96 flex-shrink-0">
+              <div className="ai-card dark:bg-gray-800 dark:border-gray-700 h-full flex flex-col">
+                <div className="ai-card-header">
+                  <h3 className="ai-card-title dark:text-white">🏆 Achievements</h3>
+                </div>
+                <div className="space-y-3 flex-1">
+                  {achievements.map((achievement) => (
+                    <div key={achievement.id} className={`p-3 rounded-lg border ${
+                      achievement.earned ? 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800' : 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700'
+                    }`}>
+                      <div className="flex items-center space-x-3">
+                        <div className="text-2xl">{achievement.icon}</div>
+                        <div className="flex-1">
+                          <h4 className="font-medium text-gray-900 dark:text-gray-100">{achievement.title}</h4>
+                          <p className="text-sm text-gray-600 dark:text-gray-400">{achievement.description}</p>
+                          {achievement.earned ? (
+                            <span className="text-xs text-yellow-600 dark:text-yellow-400">Earned {achievement.date}</span>
+                          ) : (
+                            <div className="mt-1">
+                              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5">
+                                <div 
+                                  className="bg-blue-500 dark:bg-blue-600 h-1.5 rounded-full"
+                                  style={{ width: `${achievement.progress}%` }}
+                                ></div>
+                              </div>
+                              <span className="text-xs text-gray-500 dark:text-gray-400">{achievement.progress}%</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+                </div>
+              </div>
 
-          {/* Learning Topics Progress */}
-          <div className="ai-card mt-8">
+              {/* Learning Topics Progress */}
+              <div className="ai-card dark:bg-gray-800 dark:border-gray-700 mt-8 mb-8">
             <div className="ai-card-header">
-              <h3 className="ai-card-title">📚 Topic Mastery</h3>
+              <h3 className="ai-card-title dark:text-white">📚 Topic Mastery</h3>
             </div>
             
             <div className="space-y-4">
@@ -472,7 +467,7 @@ export default function ProgressPage() {
           </div>
 
           {/* AI Insights */}
-          <div className="ai-card ai-gradient-success text-white mt-8">
+          <div className="ai-card ai-gradient-success text-white mt-8 mb-8">
             <h3 className="text-lg font-semibold mb-4">🤖 AI Learning Insights</h3>
             {loading ? (
               <div className="flex items-center justify-center py-4">
@@ -514,8 +509,8 @@ export default function ProgressPage() {
               </div>
             )}
           </div>
-            </>
           )}
+          </div>
         </div>
       </main>
     </div>
