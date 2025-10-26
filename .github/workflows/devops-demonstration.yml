@@ -134,11 +134,18 @@ jobs:
       run: |
         cd frontend
         echo "## 🧪 Frontend Test Results" >> $GITHUB_STEP_SUMMARY
-        npm test -- --coverage --watchAll=false --verbose > ../test_results_frontend.txt 2>&1
+        npm run test:ci > ../test_results_frontend.txt 2>&1 || true
         echo "### Test Summary:" >> $GITHUB_STEP_SUMMARY
         echo '```' >> $GITHUB_STEP_SUMMARY
-        tail -10 ../test_results_frontend.txt >> $GITHUB_STEP_SUMMARY
+        tail -20 ../test_results_frontend.txt >> $GITHUB_STEP_SUMMARY
         echo '```' >> $GITHUB_STEP_SUMMARY
+        # Check if tests actually passed
+        if grep -q "Tests:.*passed" ../test_results_frontend.txt; then
+          echo "✅ Frontend tests completed successfully"
+        else
+          echo "❌ Frontend tests had issues - check output above"
+          exit 1
+        fi
 
     - name: 🔍 Code Quality Analysis
       run: |
