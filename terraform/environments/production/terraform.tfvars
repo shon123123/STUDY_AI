@@ -2,7 +2,6 @@
 aws_region    = "us-west-2"
 environment   = "production"
 project_name  = "study-ai"
-
 # Network Configuration
 vpc_cidr           = "10.1.0.0/16"
 availability_zones = ["us-west-2a", "us-west-2b", "us-west-2c"]
