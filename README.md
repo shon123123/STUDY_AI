@@ -62,6 +62,7 @@ This project demonstrates comprehensive DevOps practices across 6 weeks:
 #### Local Development
 
 1. **Clone the repository**
+<<<<<<< HEAD
 ```bash
 git clone https://github.com/shon123123/STUDY_AI.git
 cd STUDY_AI
@@ -173,3 +174,9 @@ npm test
 MIT License - see [LICENSE](LICENSE) file for details.
 
 ```
+=======
+2. Run the backend with thhe command "python main.py"
+3.Frontend "npm run dev"
+
+
+>>>>>>> 06cc7a141137ae765fe71706958b8d39874f3e33
