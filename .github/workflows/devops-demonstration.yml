@@ -32,6 +32,7 @@ jobs:
   git-workflow-demo:
     name: 📋 1. Git Workflow & Collaboration
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
     - name: 🔄 Checkout Repository
       uses: actions/checkout@v4
@@ -72,6 +73,7 @@ jobs:
     name: 🚀 2. CI/CD Pipeline
     runs-on: ubuntu-latest
     needs: git-workflow-demo
+    timeout-minutes: 20
     
     services:
       mongodb:
@@ -116,6 +118,20 @@ jobs:
         cd frontend
         npm ci
 
+    - name: 🔍 Verify Services Status
+      run: |
+        echo "## 🔍 Service Health Check" >> $GITHUB_STEP_SUMMARY
+        echo "Checking service availability..." >> $GITHUB_STEP_SUMMARY
+        
+        # Check MongoDB connection
+        if timeout 10 mongosh mongodb://admin:password123@localhost:27017/test --eval "db.adminCommand('ping')" > /dev/null 2>&1; then
+          echo "- ✅ MongoDB service: Available" >> $GITHUB_STEP_SUMMARY
+          echo "MONGODB_AVAILABLE=true" >> $GITHUB_ENV
+        else
+          echo "- ⚠️ MongoDB service: Unavailable (tests will run without database)" >> $GITHUB_STEP_SUMMARY
+          echo "MONGODB_AVAILABLE=false" >> $GITHUB_ENV
+        fi
+
     - name: 🧪 Backend Testing Suite
       env:
         DATABASE_URL: mongodb://admin:password123@localhost:27017/study_ai_test?authSource=admin
@@ -123,8 +139,15 @@ jobs:
       run: |
         cd backend
         echo "## 🧪 Backend Test Results" >> $GITHUB_STEP_SUMMARY
-        echo "Running comprehensive test suite..." >> $GITHUB_STEP_SUMMARY
-        python -m pytest tests/ -v --tb=short > test_results.txt 2>&1 || true
+        
+        if [ "$MONGODB_AVAILABLE" = "true" ]; then
+          echo "Running full test suite with database..." >> $GITHUB_STEP_SUMMARY
+          python -m pytest tests/ -v --tb=short > test_results.txt 2>&1 || true
+        else
+          echo "Running tests without database dependencies..." >> $GITHUB_STEP_SUMMARY
+          python -m pytest tests/unit/ -v --tb=short > test_results.txt 2>&1 || true
+        fi
+        
         echo "### Test Summary:" >> $GITHUB_STEP_SUMMARY
         echo '```' >> $GITHUB_STEP_SUMMARY
         tail -10 test_results.txt >> $GITHUB_STEP_SUMMARY
@@ -185,6 +208,7 @@ jobs:
     name: 🐳 3. Containerization & Deployment
     runs-on: ubuntu-latest
     needs: ci-cd-demo
+    timeout-minutes: 15
     permissions:
       contents: read
       packages: write
@@ -242,6 +266,7 @@ jobs:
     name: ☸️ 4. Kubernetes Orchestration
     runs-on: ubuntu-latest
     needs: containerization-demo
+    timeout-minutes: 10
 
     steps:
     - name: 🔄 Checkout Code
@@ -291,6 +316,7 @@ jobs:
     name: 🏗️ 5. Infrastructure as Code
     runs-on: ubuntu-latest
     needs: kubernetes-demo
+    timeout-minutes: 10
 
     steps:
     - name: 🔄 Checkout Code
@@ -360,6 +386,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [git-workflow-demo, ci-cd-demo, containerization-demo, kubernetes-demo, infrastructure-demo]
     if: always()
+    timeout-minutes: 5
 
     steps:
     - name: 🔄 Checkout Code
