@@ -1,0 +1,337 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  BACKEND_IMAGE_NAME: ${{ github.repository }}-backend
+  FRONTEND_IMAGE_NAME: ${{ github.repository }}-frontend
+
+jobs:
+  # Backend Testing and Linting
+  backend-test:
+    runs-on: ubuntu-latest
+    name: Backend Tests
+    
+    services:
+      mongodb:
+        image: mongo:7.0
+        env:
+          MONGO_INITDB_ROOT_USERNAME: admin
+          MONGO_INITDB_ROOT_PASSWORD: password123
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.adminCommand({ping: 1})'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install backend dependencies
+      run: |
+        cd backend
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-asyncio httpx
+
+    - name: Lint with flake8
+      run: |
+        cd backend
+        pip install flake8
+        # Stop the build if there are Python syntax errors or undefined names
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        # Exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+    - name: Test with pytest
+      env:
+        DATABASE_URL: mongodb://admin:password123@localhost:27017/study_ai_test?authSource=admin
+        ENVIRONMENT: testing
+      run: |
+        cd backend
+        pytest -v --tb=short
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: backend-test-results
+        path: backend/pytest-report.xml
+
+  # Frontend Testing and Linting
+  frontend-test:
+    runs-on: ubuntu-latest
+    name: Frontend Tests
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Install frontend dependencies
+      run: |
+        cd frontend
+        npm ci
+
+    - name: Lint with ESLint
+      run: |
+        cd frontend
+        npm run lint
+
+    - name: Type check with TypeScript
+      run: |
+        cd frontend
+        npm run type-check
+
+    - name: Run tests
+      run: |
+        cd frontend
+        npm test -- --coverage --watchAll=false
+
+    - name: Build application
+      run: |
+        cd frontend
+        npm run build
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: frontend-test-results
+        path: frontend/coverage/
+
+  # Security scanning
+  security-scan:
+    runs-on: ubuntu-latest
+    name: Security Scan
+    needs: [backend-test, frontend-test]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  # Build Docker images
+  build-images:
+    runs-on: ubuntu-latest
+    name: Build Docker Images
+    needs: [backend-test, frontend-test, security-scan]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata for backend
+      id: backend-meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push backend image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./backend
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: ${{ steps.backend-meta.outputs.tags }}
+        labels: ${{ steps.backend-meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Extract metadata for frontend
+      id: frontend-meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push frontend image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./frontend
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: ${{ steps.frontend-meta.outputs.tags }}
+        labels: ${{ steps.frontend-meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  # Deploy to staging (develop branch)
+  deploy-staging:
+    runs-on: ubuntu-latest
+    name: Deploy to Staging
+    needs: [build-images]
+    if: github.ref == 'refs/heads/develop'
+    environment: 
+      name: staging
+      url: https://staging.study-ai.com
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'latest'
+
+    - name: Configure kubectl
+      run: |
+        echo "${{ secrets.STAGING_KUBECONFIG }}" | base64 -d > kubeconfig
+        export KUBECONFIG=kubeconfig
+
+    - name: Update image tags in manifests
+      run: |
+        # Update backend image
+        sed -i "s|study-ai-backend:latest|${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:develop|g" k8s/02-backend.yaml
+        # Update frontend image  
+        sed -i "s|study-ai-frontend:latest|${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:develop|g" k8s/03-frontend.yaml
+
+    - name: Deploy to staging cluster
+      run: |
+        export KUBECONFIG=kubeconfig
+        kubectl apply -f k8s/ -n study-ai-staging
+        kubectl rollout status deployment/backend-deployment -n study-ai-staging
+        kubectl rollout status deployment/frontend-deployment -n study-ai-staging
+
+    - name: Run smoke tests
+      run: |
+        export KUBECONFIG=kubeconfig
+        # Get service URL
+        BACKEND_URL=$(kubectl get service backend-service -n study-ai-staging -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+        
+        # Wait for services to be ready
+        sleep 30
+        
+        # Test backend health
+        curl -f http://$BACKEND_URL:8000/health || exit 1
+        
+        echo "✅ Staging deployment successful!"
+
+  # Deploy to production (main branch)
+  deploy-production:
+    runs-on: ubuntu-latest
+    name: Deploy to Production
+    needs: [build-images]
+    if: github.ref == 'refs/heads/main'
+    environment: 
+      name: production
+      url: https://study-ai.com
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'latest'
+
+    - name: Configure kubectl
+      run: |
+        echo "${{ secrets.PRODUCTION_KUBECONFIG }}" | base64 -d > kubeconfig
+        export KUBECONFIG=kubeconfig
+
+    - name: Update image tags in manifests
+      run: |
+        # Update backend image
+        sed -i "s|study-ai-backend:latest|${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:latest|g" k8s/02-backend.yaml
+        # Update frontend image
+        sed -i "s|study-ai-frontend:latest|${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:latest|g" k8s/03-frontend.yaml
+
+    - name: Deploy to production cluster
+      run: |
+        export KUBECONFIG=kubeconfig
+        kubectl apply -f k8s/ -n study-ai-production
+        kubectl rollout status deployment/backend-deployment -n study-ai-production
+        kubectl rollout status deployment/frontend-deployment -n study-ai-production
+
+    - name: Run smoke tests
+      run: |
+        export KUBECONFIG=kubeconfig
+        # Get service URL
+        BACKEND_URL=$(kubectl get service backend-service -n study-ai-production -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+        
+        # Wait for services to be ready
+        sleep 30
+        
+        # Test backend health
+        curl -f http://$BACKEND_URL:8000/health || exit 1
+        
+        echo "✅ Production deployment successful!"
+
+    - name: Create GitHub release
+      if: github.ref == 'refs/heads/main'
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ github.run_number }}
+        release_name: Release v${{ github.run_number }}
+        body: |
+          ## Changes in this Release
+          - Automated deployment via GitHub Actions
+          - Backend image: ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:latest
+          - Frontend image: ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:latest
+          
+          **Full Changelog**: ${{ github.event.compare }}
+        draft: false
+        prerelease: false

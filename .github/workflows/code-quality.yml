@@ -1,0 +1,86 @@
+name: Code Quality
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run every Monday at 9:00 AM UTC
+    - cron: '0 9 * * 1'
+
+jobs:
+  code-quality:
+    runs-on: ubuntu-latest
+    name: Code Quality Analysis
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Shallow clones should be disabled for better analysis
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: Install Python dependencies
+      run: |
+        cd backend
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install bandit safety mypy black isort
+
+    - name: Install Node.js dependencies
+      run: |
+        cd frontend
+        npm ci
+
+    - name: Python code formatting check (Black)
+      run: |
+        cd backend
+        black --check --diff .
+
+    - name: Python import sorting check (isort)
+      run: |
+        cd backend
+        isort --check-only --diff .
+
+    - name: Python type checking (mypy)
+      run: |
+        cd backend
+        mypy . --ignore-missing-imports
+
+    - name: Python security check (Bandit)
+      run: |
+        cd backend
+        bandit -r . -f json -o bandit-report.json || true
+
+    - name: Python dependency security check (Safety)
+      run: |
+        cd backend
+        safety check --json --output safety-report.json || true
+
+    - name: Frontend code formatting check (Prettier)
+      run: |
+        cd frontend
+        npx prettier --check .
+
+    - name: SonarCloud Scan
+      uses: SonarSource/sonarcloud-github-action@master
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+    - name: Upload security reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: security-reports
+        path: |
+          backend/bandit-report.json
+          backend/safety-report.json

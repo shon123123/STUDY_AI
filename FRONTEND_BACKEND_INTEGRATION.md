@@ -7,8 +7,8 @@
 2. **File Upload**: Actual file uploads to backend (not simulated anymore)
 3. **Document List**: Loads real documents from backend
 4. **Processing Status**: Polls backend every 5 seconds to check document processing
-5. **Quiz Generation**: Actually calls LLaMA 3.2 to generate quizzes
-6. **Flashcard Generation**: Actually calls LLaMA 3.2 to generate flashcards
+5. **Quiz Generation**: Actually calls gemini to generate quizzes
+6. **Flashcard Generation**: Actually calls gemini to generate flashcards
 7. **Delete Functionality**: Deletes documents from backend storage
 8. **Error Handling**: Shows upload errors, processing errors, and loading states
 

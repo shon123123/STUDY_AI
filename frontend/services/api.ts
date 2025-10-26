@@ -1,260 +1,174 @@
-// API Service for dynamic data management
-// Centralized API calls with proper error handling
+// Backend API Integration Services
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+const API_BASE_URL = 'http://localhost:8000/api'
 
-export interface Class {
+// Backend Document Types
+interface BackendDocument {
   id: string
-  title: string
-  subtitle: string
-  description?: string
-  instructor: string
-  time: string
-  location: string
-  students: number
-  currentLesson: number
-  totalLessons: number
-  progress: number
-  icon: string
-  color: string
-  status?: string
-  type: 'class' | 'exam' | 'meeting'
+  filename: string
+  file_type: string
+  file_size: number
+  upload_date: string
+  processed: boolean
+  processing_status: 'processing' | 'completed' | 'failed'
+  status: 'processing' | 'ready' | 'failed'
+  summary?: string
+  flashcard_count?: number
+  question_count?: number
+  content?: string
+  flashcards?: any[]
+  questions?: any[]
+  error?: string
 }
 
-export interface ScheduleEvent {
-  id: string
-  title: string
-  subtitle?: string
-  date: string
-  time: string
-  location: string
-  type: 'class' | 'exam' | 'meeting' | 'assignment'
-  color: string
-  status: 'scheduled' | 'completed' | 'cancelled'
+interface UploadResponse {
+  message: string
+  document_id: string
+  filename: string
+  status: string
+  estimated_time: string
 }
 
-export interface Grade {
-  id: string
-  subject: string
-  term: string
-  grade: number
-  maxGrade: number
-  examType: string
-  date: string
-  instructor: string
-}
-
-export interface StudentProfile {
-  id: string
-  name: string
-  email: string
-  program: string
-  year: number
-  gpa: number
-  avatar?: string
-}
-
-class ApiService {
-  // User Classes
-  async getClasses(): Promise<Class[]> {
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/classes`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      })
-      
-      if (!response.ok) {
-        throw new Error(`Failed to fetch classes: ${response.status}`)
-      }
-      
-      return await response.json()
-    } catch (error) {
-      console.error('Error fetching classes:', error)
-      // Return fallback data if API fails
-      return this.getFallbackClasses()
+// Document Service
+export const documentService = {
+  async uploadDocument(file: File, onProgress?: (progress: number) => void): Promise<BackendDocument> {
+    console.log('📤 Starting upload for:', file.name, file.type, file.size)
+    
+    const formData = new FormData()
+    formData.append('file', file)
+    
+    console.log('🌐 Making request to:', `${API_BASE_URL}/documents/upload`)
+    
+    const response = await fetch(`${API_BASE_URL}/documents/upload`, {
+      method: 'POST',
+      body: formData,
+    })
+    
+    console.log('📥 Response received:', response.status, response.statusText)
+    
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error('❌ Upload failed:', response.status, errorText)
+      throw new Error(`Upload failed: ${response.status} ${errorText}`)
     }
-  }
-
-  // Schedule Events
-  async getSchedule(startDate?: string, endDate?: string): Promise<ScheduleEvent[]> {
-    try {
-      const params = new URLSearchParams()
-      if (startDate) params.append('start_date', startDate)
-      if (endDate) params.append('end_date', endDate)
+    
+    const uploadResult: UploadResponse = await response.json()
+    console.log('✅ Upload result:', uploadResult)
+    
+    // Simulate progress for UI (since backend processes in background)
+    if (onProgress) {
+      const progressInterval = setInterval(() => {
+        const progress = Math.min(Math.random() * 100, 95)
+        onProgress(progress)
+      }, 500)
       
-      const response = await fetch(`${API_BASE_URL}/api/schedule?${params}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      })
-      
-      if (!response.ok) {
-        throw new Error(`Failed to fetch schedule: ${response.status}`)
-      }
-      
-      return await response.json()
-    } catch (error) {
-      console.error('Error fetching schedule:', error)
-      return this.getFallbackSchedule()
+      setTimeout(() => {
+        clearInterval(progressInterval)
+        onProgress(100)
+      }, 3000)
     }
-  }
-
-  // Student Grades
-  async getGrades(semester?: string): Promise<Grade[]> {
-    try {
-      const params = new URLSearchParams()
-      if (semester) params.append('semester', semester)
-      
-      const response = await fetch(`${API_BASE_URL}/api/grades?${params}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      })
-      
-      if (!response.ok) {
-        throw new Error(`Failed to fetch grades: ${response.status}`)
-      }
-      
-      return await response.json()
-    } catch (error) {
-      console.error('Error fetching grades:', error)
-      return this.getFallbackGrades()
-    }
-  }
-
-  // Student Profile
-  async getProfile(): Promise<StudentProfile> {
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/profile`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      })
-      
-      if (!response.ok) {
-        throw new Error(`Failed to fetch profile: ${response.status}`)
-      }
-      
-      return await response.json()
-    } catch (error) {
-      console.error('Error fetching profile:', error)
-      return this.getFallbackProfile()
-    }
-  }
-
-  // Add new class
-  async addClass(classData: Omit<Class, 'id'>): Promise<Class> {
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/classes`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(classData),
-      })
-      
-      if (!response.ok) {
-        throw new Error(`Failed to add class: ${response.status}`)
-      }
-      
-      return await response.json()
-    } catch (error) {
-      console.error('Error adding class:', error)
-      throw error
-    }
-  }
-
-  // Update class progress
-  async updateClassProgress(classId: string, progress: number): Promise<void> {
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/classes/${classId}/progress`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ progress }),
-      })
-      
-      if (!response.ok) {
-        throw new Error(`Failed to update class progress: ${response.status}`)
-      }
-    } catch (error) {
-      console.error('Error updating class progress:', error)
-      throw error
-    }
-  }
-
-  // Fallback data (minimal and user-customizable)
-  private getFallbackClasses(): Class[] {
-    return [
-      {
-        id: 'fallback-1',
-        title: "Getting Started",
-        subtitle: "Welcome to your study assistant",
-        instructor: "AI Assistant",
-        time: "Add your first class",
-        location: "Dashboard",
-        students: 0,
-        currentLesson: 0,
-        totalLessons: 1,
-        progress: 0,
-        icon: "🎓",
-        color: "bg-blue-100",
-        status: "Click + to add classes",
-        type: 'class'
-      }
-    ]
-  }
-
-  private getFallbackSchedule(): ScheduleEvent[] {
-    const today = new Date()
-    return [
-      {
-        id: 'fallback-schedule-1',
-        title: "Welcome",
-        subtitle: "Set up your schedule",
-        date: today.toISOString().split('T')[0],
-        time: "12:00 PM",
-        location: "Dashboard",
-        type: 'class',
-        color: "bg-blue-200",
-        status: 'scheduled'
-      }
-    ]
-  }
-
-  private getFallbackGrades(): Grade[] {
-    return [
-      {
-        id: 'fallback-grade-1',
-        subject: "Sample Course",
-        term: "Current Term",
-        grade: 0,
-        maxGrade: 100,
-        examType: "Setup Required",
-        date: new Date().toISOString().split('T')[0],
-        instructor: "System"
-      }
-    ]
-  }
-
-  private getFallbackProfile(): StudentProfile {
+    
+    // Return a document object with the upload response data
     return {
-      id: 'fallback-profile',
-      name: "New Student",
-      email: "student@example.com",
-      program: "General Studies",
-      year: 1,
-      gpa: 0.0,
-      avatar: "👨‍🎓"
+      id: uploadResult.document_id,
+      filename: uploadResult.filename,
+      file_type: file.type,
+      file_size: file.size,
+      upload_date: new Date().toISOString(),
+      processed: false,
+      processing_status: 'processing',
+      status: uploadResult.status as any,
+      summary: '',
+      flashcard_count: 0,
+      question_count: 0
     }
+  },
+
+  async getDocuments(): Promise<BackendDocument[]> {
+    const response = await fetch(`${API_BASE_URL}/documents`)
+    if (!response.ok) {
+      throw new Error('Failed to fetch documents')
+    }
+    const data = await response.json()
+    return data.documents || []
+  },
+
+  async deleteDocument(id: string) {
+    const response = await fetch(`${API_BASE_URL}/documents/${id}`, {
+      method: 'DELETE',
+    })
+    
+    if (!response.ok) {
+      throw new Error('Delete failed')
+    }
+    
+    return response.json()
+  },
+
+  async getDocumentStatus(id: string): Promise<BackendDocument> {
+    const response = await fetch(`${API_BASE_URL}/documents/${id}/status`)
+    
+    if (!response.ok) {
+      throw new Error('Failed to get status')
+    }
+    
+    return response.json()
   }
 }
 
-export const apiService = new ApiService()
-export default apiService
+// Quiz Service
+export const quizService = {
+  async getQuizzes() {
+    const response = await fetch(`${API_BASE_URL}/quizzes`)
+    if (!response.ok) {
+      throw new Error('Failed to fetch quizzes')
+    }
+    return response.json()
+  },
+
+  async getQuizResults() {
+    const response = await fetch(`${API_BASE_URL}/quiz-results`)
+    if (!response.ok) {
+      throw new Error('Failed to fetch quiz results')
+    }
+    return response.json()
+  }
+}
+
+// Progress Service
+export const progressService = {
+  async getLearningProgress() {
+    const response = await fetch(`${API_BASE_URL}/learning-progress`)
+    if (!response.ok) {
+      throw new Error('Failed to fetch learning progress')
+    }
+    return response.json()
+  },
+
+  async getSmartRecommendations() {
+    const response = await fetch(`${API_BASE_URL}/smart-recommendations`)
+    if (!response.ok) {
+      throw new Error('Failed to fetch recommendations')
+    }
+    return response.json()
+  }
+}
+
+// Tutoring Service
+export const tutoringService = {
+  async sendMessage(message: string) {
+    const response = await fetch(`${API_BASE_URL}/tutoring/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ message }),
+    })
+    
+    if (!response.ok) {
+      throw new Error('Failed to send message')
+    }
+    
+    return response.json()
+  }
+}

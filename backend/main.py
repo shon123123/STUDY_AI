@@ -1,13 +1,21 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from pydantic import BaseModel
-from typing import List, Optional
+from pydantic import BaseModel, Field
+from typing import List, Optional, Dict, Any
 import uvicorn
 import logging
 from datetime import datetime, timedelta
 import uuid
 from bson import ObjectId
+
+# Request/Response Models
+class QuizGenerationRequest(BaseModel):
+    num_questions: int = Field(default=10, description="Number of questions to generate")
+    difficulty: str = Field(default="medium", description="Difficulty level: easy, medium, hard")
+
+class FlashcardGenerationRequest(BaseModel):
+    num_cards: int = Field(default=15, description="Number of flashcards to generate")
 
 # Comprehensive recursive serialization function for MongoDB documents
 def serialize_value(value):
@@ -253,12 +261,20 @@ app.add_middleware(
 # app.include_router(quizzes_router, prefix="/api")
 # TODO: Add back when dependencies are fixed
 
-# Simple in-memory storage for uploaded documents
-uploaded_documents = {}
+# Add AI Insights router
+try:
+    from services.ai_study_features import ai_study_router
+    app.include_router(ai_study_router, prefix="/api/ai")
+    logger.info("✅ AI Insights router loaded successfully")
+except Exception as e:
+    logger.warning(f"⚠️  AI Insights router failed to load: {e}")
+
+# MongoDB storage for uploaded documents (persistent)
+# uploaded_documents = {}  # Remove in-memory storage
 
 @app.post("/api/documents/upload", tags=["Documents"])
 async def upload_document_simple(file: UploadFile = File(...)):
-    """Upload document and auto-process immediately"""
+    """Upload document and process PDF content immediately - Save to MongoDB"""
     try:
         # Generate unique document ID
         doc_id = str(abs(hash(f"{file.filename}_{datetime.utcnow().isoformat()}")))
@@ -268,33 +284,112 @@ async def upload_document_simple(file: UploadFile = File(...)):
         file_size = len(file_content)
         await file.seek(0)  # Reset file pointer
         
-        # Store document info with ready status (mark as processed immediately)
-        uploaded_documents[doc_id] = {
+        # Extract actual content from PDF
+        extracted_content = ""
+        final_summary = "Document uploaded and ready for use"
+        
+        if file.content_type == 'application/pdf' or file.filename.lower().endswith('.pdf'):
+            try:
+                # Extract PDF content
+                import PyPDF2
+                import io
+                
+                pdf_buffer = io.BytesIO(file_content)
+                pdf_reader = PyPDF2.PdfReader(pdf_buffer)
+                
+                # Extract text from all pages
+                pdf_text = ""
+                for page_num, page in enumerate(pdf_reader.pages):
+                    page_text = page.extract_text()
+                    if page_text.strip():
+                        pdf_text += f"\n--- Page {page_num + 1} ---\n{page_text}\n"
+                
+                if pdf_text.strip():
+                    extracted_content = pdf_text
+                    # Generate a better summary using Gemini if available
+                    if gemini_ai_service and len(pdf_text) > 50:
+                        try:
+                            summary_prompt = f"Provide a concise summary of this document content:\n\n{pdf_text[:3000]}"
+                            final_summary = await gemini_ai_service.generate_study_response(
+                                question=summary_prompt,
+                                context="Document Summary",
+                                difficulty="medium"
+                            )
+                        except:
+                            final_summary = f"PDF document with {len(pdf_reader.pages)} pages processed successfully"
+                else:
+                    final_summary = "PDF uploaded but text extraction may be limited"
+                    
+                logger.info(f"📄 PDF processed: {len(pdf_reader.pages)} pages, {len(extracted_content)} characters extracted")
+                
+            except Exception as e:
+                logger.warning(f"PDF processing failed: {e}")
+                extracted_content = f"PDF file uploaded: {file.filename}"
+                final_summary = "PDF uploaded - content extraction encountered issues"
+        
+        elif file.content_type.startswith('text/') or file.filename.lower().endswith(('.txt', '.md')):
+            # Handle text files
+            try:
+                extracted_content = file_content.decode('utf-8', errors='ignore')
+                if len(extracted_content) > 100:
+                    final_summary = f"Text document with {len(extracted_content)} characters processed"
+            except:
+                extracted_content = "Text file uploaded but could not decode content"
+                final_summary = "Text file uploaded with encoding issues"
+        
+        else:
+            # Other file types
+            extracted_content = f"File uploaded: {file.filename}"
+            final_summary = f"Document uploaded: {file.filename}"
+        
+        # Store document info with extracted content in MongoDB
+        document_data = {
+            '_id': doc_id,
             'id': doc_id,
             'filename': file.filename,
             'file_type': file.content_type,
             'file_size': file_size,
             'upload_date': datetime.utcnow().isoformat(),
-            'processed': True,  # Mark as processed/ready immediately
-            'processing_status': 'ready',  # Status is 'ready' not 'uploaded'
-            'content': file_content.decode('utf-8', errors='ignore') if file_size < 1000000 else '',  # Store text content
-            'final_summary': 'Document uploaded and ready for use',
+            'processed': True,
+            'processing_status': 'completed',
+            'status': 'ready',
+            'content': extracted_content,  # Now contains actual extracted text
+            'final_summary': final_summary,
             'analysis_results': [],
             'flashcards': [],
             'processed_pages': 0,
             'total_pages': 0,
-            'study_materials': {}
+            'study_materials': {},
+            'created_at': datetime.utcnow(),
+            'updated_at': datetime.utcnow()
         }
         
-        logger.info(f"📄 Upload completed: {file.filename} ({file_size} bytes) - Status: READY")
+        # Save to MongoDB
+        if get_database:
+            try:
+                db = await get_database()
+                documents_collection = db.documents
+                await documents_collection.insert_one(document_data)
+                logger.info(f"💾 Document saved to MongoDB: {doc_id}")
+            except Exception as e:
+                logger.error(f"❌ Failed to save to MongoDB: {e}")
+                # Continue without failing the upload
+        
+        # Also keep in memory for backward compatibility (temporary)
+        uploaded_documents = getattr(app.state, 'uploaded_documents', {})
+        uploaded_documents[doc_id] = document_data
+        app.state.uploaded_documents = uploaded_documents
+        
+        logger.info(f"📄 Upload completed: {file.filename} ({file_size} bytes) - Content extracted: {len(extracted_content)} chars")
         
         return {
-            "message": "File uploaded successfully",
+            "message": "File uploaded and processed successfully",
             "document_id": doc_id,
             "filename": file.filename,
             "size": file_size,
-            "status": "ready",  # Return ready status
-            "processed": True
+            "status": "ready",
+            "processed": True,
+            "content_length": len(extracted_content)
         }
         
     except Exception as e:
@@ -464,83 +559,195 @@ async def get_document_progress(doc_id: str):
 
 @app.get("/api/documents", tags=["Documents"])
 async def list_documents():
-    """List all uploaded documents with correct status"""
-    return {
-        "documents": [
-            {
-                "id": doc_id,
-                "filename": doc.get('filename', 'Unknown'),
-                "file_type": doc.get('file_type', 'application/pdf'),
-                "file_size": doc.get('file_size', 0),
-                "upload_date": doc.get('upload_timestamp', doc.get('upload_date', datetime.now().isoformat())),
-                "processed": doc.get('processed', True),  # Default to True for uploaded docs
-                "processing_status": doc.get('processing_status', 'ready'),  # Default to 'ready'
-                "summary": doc.get('summary', doc.get('final_summary', 'Document ready for use')),
-                "flashcard_count": len(doc.get('flashcards', [])),
-                "question_count": len(doc.get('questions', [])),
-                "error": doc.get('error', None)
-            }
-            for doc_id, doc in uploaded_documents.items()
-        ],
-        "total": len(uploaded_documents)
-    }
+    """List all uploaded documents from MongoDB"""
+    try:
+        documents = []
+        
+        # Try to get from MongoDB first
+        if get_database:
+            try:
+                db = await get_database()
+                documents_collection = db.documents
+                
+                # Get all documents from MongoDB, sorted by upload date (newest first)
+                cursor = documents_collection.find({}).sort("upload_date", -1)
+                mongo_documents = await cursor.to_list(length=None)
+                
+                # Convert ObjectId to string and format dates
+                for doc in mongo_documents:
+                    doc["id"] = str(doc.get("_id", doc.get("id", "")))
+                    if "_id" in doc:
+                        del doc["_id"]
+                    
+                    # Convert datetime to ISO string if needed
+                    if isinstance(doc.get("upload_date"), datetime):
+                        doc["upload_date"] = doc["upload_date"].isoformat()
+                    
+                    documents.append({
+                        "id": doc.get("id"),
+                        "filename": doc.get('filename', 'Unknown'),
+                        "file_type": doc.get('file_type', 'application/pdf'),
+                        "file_size": doc.get('file_size', 0),
+                        "upload_date": doc.get('upload_date', datetime.now().isoformat()),
+                        "processed": doc.get('processed', True),
+                        "processing_status": doc.get('processing_status', 'ready'),
+                        "status": doc.get('status', 'ready'),
+                        "summary": doc.get('final_summary', 'Document ready for use'),
+                        "flashcard_count": len(doc.get('flashcards', [])),
+                        "question_count": len(doc.get('questions', [])),
+                        "error": doc.get('error', None)
+                    })
+                
+                logger.info(f"📊 Retrieved {len(documents)} documents from MongoDB")
+                
+            except Exception as e:
+                logger.error(f"❌ MongoDB read error: {e}")
+                # Fallback to in-memory storage
+                uploaded_documents = getattr(app.state, 'uploaded_documents', {})
+                documents = [
+                    {
+                        "id": doc_id,
+                        "filename": doc.get('filename', 'Unknown'),
+                        "file_type": doc.get('file_type', 'application/pdf'),
+                        "file_size": doc.get('file_size', 0),
+                        "upload_date": doc.get('upload_date', datetime.now().isoformat()),
+                        "processed": doc.get('processed', True),
+                        "processing_status": doc.get('processing_status', 'ready'),
+                        "summary": doc.get('final_summary', 'Document ready for use'),
+                        "flashcard_count": len(doc.get('flashcards', [])),
+                        "question_count": len(doc.get('questions', [])),
+                        "error": doc.get('error', None)
+                    }
+                    for doc_id, doc in uploaded_documents.items()
+                ]
+        
+        return {
+            "documents": documents,
+            "total": len(documents)
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Document list error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve documents"
+        )
 
 @app.get("/api/documents/{doc_id}/status", tags=["Documents"])
 async def get_document_status(doc_id: str):
-    """Get processing status of a specific document"""
-    if doc_id not in uploaded_documents:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    doc = uploaded_documents[doc_id]
-    return {
-        "id": doc_id,
-        "filename": doc.get('filename'),
-        "status": doc.get('processing_status', 'completed'),
-        "upload_time": doc.get('upload_timestamp'),
-        "processing_time": doc.get('processing_time'),
-        "study_materials_ready": bool(doc.get('study_materials'))
-    }
+    """Get processing status of a specific document from MongoDB"""
+    try:
+        doc = None
+        
+        # Try to get from MongoDB first
+        if get_database:
+            try:
+                db = await get_database()
+                documents_collection = db.documents
+                doc = await documents_collection.find_one({"_id": doc_id})
+                
+                if doc:
+                    return {
+                        "id": doc_id,
+                        "filename": doc.get('filename'),
+                        "status": doc.get('status', doc.get('processing_status', 'ready')),
+                        "processing_status": doc.get('processing_status', 'completed'),
+                        "upload_time": doc.get('upload_date'),
+                        "processing_time": doc.get('processing_time'),
+                        "study_materials_ready": bool(doc.get('study_materials', {}))
+                    }
+            except Exception as e:
+                logger.error(f"❌ MongoDB status read error: {e}")
+        
+        # Fallback to in-memory storage
+        uploaded_documents = getattr(app.state, 'uploaded_documents', {})
+        if doc_id not in uploaded_documents:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        doc = uploaded_documents[doc_id]
+        return {
+            "id": doc_id,
+            "filename": doc.get('filename'),
+            "status": doc.get('processing_status', 'completed'),
+            "upload_time": doc.get('upload_timestamp'),
+            "processing_time": doc.get('processing_time'),
+            "study_materials_ready": bool(doc.get('study_materials'))
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Document status error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get document status")
 
 @app.post("/api/documents/{doc_id}/quiz", tags=["Documents"])
-async def generate_quiz_for_document(doc_id: str):
-    """Generate a quiz from an uploaded document"""
+async def generate_quiz_for_document(doc_id: str, quiz_request: QuizGenerationRequest):
+    """Generate a quiz from an uploaded document stored in MongoDB"""
     logger.info(f"❓ Quiz generation request for document ID: {doc_id}")
+    logger.info(f"📊 Quiz options: {quiz_request.num_questions} questions, {quiz_request.difficulty} difficulty")
     
-    if doc_id not in uploaded_documents:
-        logger.error(f"❌ Document not found: {doc_id}")
-        raise HTTPException(status_code=404, detail="Document not found")
+    # Try to get document from MongoDB first
+    doc = None
+    if get_database:
+        try:
+            db = await get_database()
+            documents_collection = db.documents
+            doc = await documents_collection.find_one({"_id": doc_id})
+            logger.info(f"📊 Retrieved document from MongoDB: {doc_id}")
+        except Exception as e:
+            logger.error(f"❌ MongoDB read error: {e}")
     
-    doc = uploaded_documents[doc_id]
+    # Fallback to in-memory storage
+    if not doc:
+        uploaded_documents = getattr(app.state, 'uploaded_documents', {})
+        if doc_id not in uploaded_documents:
+            logger.error(f"❌ Document not found: {doc_id}")
+            raise HTTPException(status_code=404, detail="Document not found")
+        doc = uploaded_documents[doc_id]
     
     try:
-        content = doc.get('content', '')
-        if not content:
-            raise HTTPException(status_code=400, detail="Document has no content")
+        content = doc.get('content', '')  # Use extracted content
+        
+        # Fallback to summary if no extracted content
+        if not content or len(content.strip()) < 50:
+            content = doc.get('final_summary', '')
+        
+        if not content or len(content.strip()) < 20:
+            raise HTTPException(status_code=400, detail="Document has no usable content for quiz generation")
+        
+        logger.info(f"📝 Generating quiz from {len(content)} characters of content from {doc['filename']}")
         
         # Use Gemini service to generate quiz
         if gemini_ai_service:
             try:
-                # Create quiz prompt
+                # Create quiz prompt with user parameters
                 quiz_prompt = f"""
-                Generate 10 multiple choice quiz questions based on this content:
+                Generate {quiz_request.num_questions} multiple choice quiz questions based on this content from "{doc['filename']}":
                 
-                {content[:3000]}
+                DOCUMENT CONTENT:
+                {content[:5000]}
+                
+                Requirements:
+                - Questions must be based on the actual content above
+                - Test understanding, not just memorization  
+                - Difficulty level: {quiz_request.difficulty}
+                - Provide clear explanations
                 
                 Format each question as JSON:
                 {{
-                    "question": "Question text?",
+                    "question": "Question text based on the content?",
                     "options": ["Option A", "Option B", "Option C", "Option D"],
                     "correctAnswer": "Correct option text",
-                    "explanation": "Why this is correct"
+                    "explanation": "Why this is correct based on the content"
                 }}
                 
-                Return only a JSON array of questions.
+                Return only a JSON array of {quiz_request.num_questions} questions.
                 """
                 
                 response = await gemini_ai_service.generate_study_response(
                     question=quiz_prompt,
                     context="Quiz Generation",
-                    difficulty="medium"
+                    difficulty=quiz_request.difficulty
                 )
                 
                 # Parse response
@@ -569,12 +776,29 @@ async def generate_quiz_for_document(doc_id: str):
                 doc['questions'] = questions
                 doc['question_count'] = len(questions)
                 
+                # Also store in global generated_quizzes for /api/quizzes endpoint
+                quiz_id = str(uuid.uuid4())
+                quiz_data = {
+                    "id": quiz_id,
+                    "title": f"Quiz: {doc['filename']}",
+                    "description": f"Generated from {doc['filename']}",
+                    "questions": questions,
+                    "source": doc['filename'],
+                    "document_id": doc_id,
+                    "difficulty": quiz_request.difficulty,
+                    "created_at": datetime.now().isoformat(),
+                    "status": "ready"
+                }
+                generated_quizzes[quiz_id] = quiz_data
+                
                 logger.info(f"✅ Generated {len(questions)} quiz questions for {doc['filename']}")
+                logger.info(f"✅ Stored quiz in global collection with ID: {quiz_id}")
                 
                 return {
                     "success": True,
                     "message": "Quiz generated successfully",
                     "document_id": doc_id,
+                    "quiz_id": quiz_id,
                     "questions": questions,
                     "total": len(questions)
                 }
@@ -592,15 +816,29 @@ async def generate_quiz_for_document(doc_id: str):
         raise HTTPException(status_code=500, detail=f"Quiz generation failed: {str(e)}")
 
 @app.post("/api/documents/{doc_id}/flashcards", tags=["Documents"])
-async def generate_flashcards_for_document(doc_id: str):
-    """Generate flashcards from an uploaded document"""
+async def generate_flashcards_for_document(doc_id: str, flashcard_request: FlashcardGenerationRequest):
+    """Generate flashcards from an uploaded document stored in MongoDB"""
     logger.info(f"🧠 Flashcard generation request for document ID: {doc_id}")
+    logger.info(f"📊 Flashcard options: {flashcard_request.num_cards} cards")
     
-    if doc_id not in uploaded_documents:
-        logger.error(f"❌ Document not found: {doc_id}")
-        raise HTTPException(status_code=404, detail="Document not found")
+    # Try to get document from MongoDB first
+    doc = None
+    if get_database:
+        try:
+            db = await get_database()
+            documents_collection = db.documents
+            doc = await documents_collection.find_one({"_id": doc_id})
+            logger.info(f"📊 Retrieved document from MongoDB: {doc_id}")
+        except Exception as e:
+            logger.error(f"❌ MongoDB read error: {e}")
     
-    doc = uploaded_documents[doc_id]
+    # Fallback to in-memory storage
+    if not doc:
+        uploaded_documents = getattr(app.state, 'uploaded_documents', {})
+        if doc_id not in uploaded_documents:
+            logger.error(f"❌ Document not found: {doc_id}")
+            raise HTTPException(status_code=404, detail="Document not found")
+        doc = uploaded_documents[doc_id]
     
     try:
         content = doc.get('content', '')
@@ -610,11 +848,24 @@ async def generate_flashcards_for_document(doc_id: str):
         # Use Gemini service to generate flashcards
         if gemini_ai_service:
             try:
-                # Generate flashcards using Gemini
+                # Use more content for better flashcard generation (increase from 5000 to 15000 chars)
+                # Split content into chunks if it's very long
+                content_for_flashcards = content[:15000] if len(content) > 15000 else content
+                
+                # If content is still very long, prioritize the beginning and middle sections
+                if len(content) > 15000:
+                    # Take first 10k chars and last 5k chars to capture key concepts
+                    first_part = content[:10000]
+                    last_part = content[-5000:] if len(content) > 10000 else ""
+                    content_for_flashcards = first_part + "\n\n[...content continues...]\n\n" + last_part
+                
+                logger.info(f"🃏 Using {len(content_for_flashcards)} characters from {len(content)} total for flashcard generation")
+                
+                # Generate flashcards using Gemini with user-specified number
                 flashcards_raw = await gemini_ai_service.generate_flashcards(
-                    content=content[:5000],
+                    content=content_for_flashcards,
                     filename=doc['filename'],
-                    num_cards=20
+                    num_cards=flashcard_request.num_cards
                 )
                 
                 # Transform to flashcard format with spaced repetition metadata
@@ -697,52 +948,143 @@ async def generate_flashcards_for_document(doc_id: str):
 
 @app.delete("/api/documents/{doc_id}", tags=["Documents"])
 async def delete_document(doc_id: str):
-    """Delete an uploaded document"""
+    """Delete an uploaded document from MongoDB and memory"""
     logger.info(f"🗑️ Delete request received for document ID: {doc_id}")
-    logger.info(f"📊 Current documents in storage: {list(uploaded_documents.keys())}")
     
-    if doc_id not in uploaded_documents:
-        logger.error(f"❌ Document not found: {doc_id}")
+    # Try to delete from MongoDB first
+    doc = None
+    if get_database:
+        try:
+            db = await get_database()
+            documents_collection = db.documents
+            
+            # Get document before deletion for logging
+            doc = await documents_collection.find_one({"_id": doc_id})
+            if doc:
+                # Delete from MongoDB
+                result = await documents_collection.delete_one({"_id": doc_id})
+                if result.deleted_count > 0:
+                    logger.info(f"✅ Deleted document from MongoDB: {doc.get('filename', 'Unknown')} (ID: {doc_id})")
+                else:
+                    logger.warning(f"⚠️ Document not found in MongoDB: {doc_id}")
+            
+        except Exception as e:
+            logger.error(f"❌ MongoDB delete error: {e}")
+    
+    # Also check and delete from in-memory storage as fallback
+    uploaded_documents = getattr(app.state, 'uploaded_documents', {})
+    if doc_id in uploaded_documents:
+        filename = uploaded_documents[doc_id].get('filename', 'Unknown')
+        del uploaded_documents[doc_id]
+        app.state.uploaded_documents = uploaded_documents
+        logger.info(f"✅ Deleted document from memory: {filename} (ID: {doc_id})")
+        if not doc:  # If not found in MongoDB, use memory doc for response
+            doc = {"filename": filename}
+    
+    if not doc and doc_id not in uploaded_documents:
+        logger.error(f"❌ Document not found in either MongoDB or memory: {doc_id}")
         raise HTTPException(
             status_code=404, 
-            detail=f"Document not found. Available IDs: {list(uploaded_documents.keys())[:5]}"
+            detail=f"Document not found: {doc_id}"
         )
-    
+
     try:
-        # Get filename for logging
-        filename = uploaded_documents[doc_id].get('filename', 'Unknown')
+        filename = doc.get('filename', 'Unknown') if doc else 'Unknown'
         
-        # Delete from storage
-        del uploaded_documents[doc_id]
+        # Count remaining documents
+        remaining_count = 0
+        if get_database:
+            try:
+                db = await get_database()
+                documents_collection = db.documents
+                remaining_count = await documents_collection.count_documents({})
+            except:
+                remaining_count = len(uploaded_documents)
+        else:
+            remaining_count = len(uploaded_documents)
         
-        logger.info(f"✅ Deleted document: {filename} (ID: {doc_id})")
-        logger.info(f"📊 Remaining documents: {len(uploaded_documents)}")
+        logger.info(f"📊 Remaining documents: {remaining_count}")
         
         return {
             "success": True,
             "message": f"Document '{filename}' deleted successfully",
             "document_id": doc_id,
-            "remaining_documents": len(uploaded_documents)
+            "remaining_documents": remaining_count
         }
     except Exception as e:
         logger.error(f"❌ Error deleting document: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to delete document: {str(e)}")
 
-@app.get("/api/documents/debug/storage", tags=["Documents"])
-async def debug_document_storage():
-    """Debug endpoint to see what documents are in storage"""
+@app.get("/api/debug/quiz-status", tags=["Debug"])
+async def debug_quiz_status():
+    """Debug endpoint to check quiz generation status"""
     return {
-        "total_documents": len(uploaded_documents),
-        "document_ids": list(uploaded_documents.keys()),
-        "documents": [
+        "total_generated_quizzes": len(generated_quizzes),
+        "quiz_ids": list(generated_quizzes.keys()),
+        "quiz_summaries": [
             {
-                "id": doc_id,
-                "filename": doc.get('filename', 'Unknown'),
-                "file_size": doc.get('file_size', 0),
-                "upload_date": doc.get('upload_date', 'Unknown')
+                "id": quiz.get("id"),
+                "title": quiz.get("title"),
+                "source": quiz.get("source"),
+                "question_count": len(quiz.get("questions", []))
             }
-            for doc_id, doc in uploaded_documents.items()
+            for quiz in generated_quizzes.values()
         ]
+    }
+    """Debug endpoint to see what documents are in storage (MongoDB + Memory)"""
+    
+    # Get documents from MongoDB
+    mongodb_docs = []
+    mongodb_count = 0
+    if get_database:
+        try:
+            db = await get_database()
+            documents_collection = db.documents
+            mongodb_count = await documents_collection.count_documents({})
+            
+            async for doc in documents_collection.find({}).limit(10):
+                mongodb_docs.append({
+                    "id": doc.get('_id'),
+                    "filename": doc.get('filename', 'Unknown'),
+                    "file_size": doc.get('file_size', 0),
+                    "upload_date": doc.get('upload_date', 'Unknown'),
+                    "has_content": bool(doc.get('content', '')),
+                    "source": "MongoDB"
+                })
+        except Exception as e:
+            logger.error(f"❌ MongoDB debug error: {e}")
+    
+    # Get documents from memory
+    uploaded_documents = getattr(app.state, 'uploaded_documents', {})
+    memory_docs = [
+        {
+            "id": doc_id,
+            "filename": doc.get('filename', 'Unknown'),
+            "file_size": doc.get('file_size', 0),
+            "upload_date": doc.get('upload_date', 'Unknown'),
+            "has_content": bool(doc.get('content', '')),
+            "source": "Memory"
+        }
+        for doc_id, doc in uploaded_documents.items()
+    ]
+    
+    return {
+        "mongodb": {
+            "total_documents": mongodb_count,
+            "documents": mongodb_docs
+        },
+        "memory": {
+            "total_documents": len(uploaded_documents),
+            "document_ids": list(uploaded_documents.keys()),
+            "documents": memory_docs
+        },
+        "summary": {
+            "total_mongodb": mongodb_count,
+            "total_memory": len(uploaded_documents),
+            "combined_unique": len(set(
+                [doc['id'] for doc in mongodb_docs] + list(uploaded_documents.keys())
+            ))
+        }
     }
 
 @app.post("/api/tutoring/chat", tags=["AI Tutoring"])
@@ -757,13 +1099,40 @@ async def chat_with_tutor(message: dict):
         study_mode = message.get('study_mode', 'chat')
         difficulty = message.get('difficulty', 'medium')
         
-        # Use Gemini for fast responses
+        # Handle simple greetings more professionally
+        simple_greetings = ['hi', 'hello', 'hey', 'howdy', 'good morning', 'good afternoon', 'good evening']
+        if user_message.lower().strip() in simple_greetings:
+            return {
+                "response": f"Hello! I'm your AI Study Assistant, equipped with advanced pedagogical frameworks to support your learning journey. 📚\n\n**I can help you with:**\n• **Content Mastery**: Breaking down complex concepts into understandable components\n• **Study Strategy**: Personalized learning techniques based on cognitive science\n• **Assessment Preparation**: Creating targeted practice materials from your documents\n• **Knowledge Synthesis**: Connecting ideas across different subjects and materials\n\n**How would you like to begin?** You can ask me to explain a concept, generate study materials, or help you develop a learning strategy.",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        
+        # Detect study request types and enhance context
+        study_context = ""
+        user_message_lower = user_message.lower()
+        
+        if any(word in user_message_lower for word in ['explain', 'understand', 'clarify', 'what is', 'define']):
+            study_context = "CONCEPTUAL_EXPLANATION"
+            difficulty = "detailed"
+        elif any(word in user_message_lower for word in ['how to', 'steps', 'process', 'method', 'technique']):
+            study_context = "PROCEDURAL_GUIDANCE"
+        elif any(word in user_message_lower for word in ['study plan', 'schedule', 'organize', 'strategy']):
+            study_context = "STUDY_STRATEGY"
+        elif any(word in user_message_lower for word in ['quiz', 'test', 'exam', 'practice', 'assessment']):
+            study_context = "ASSESSMENT_PREPARATION"
+        elif any(word in user_message_lower for word in ['summary', 'summarize', 'key points', 'overview']):
+            study_context = "CONTENT_SYNTHESIS"
+        
+        # Enhanced context for Gemini
+        enhanced_context = f"{context}\n\nRequest Type: {study_context}" if study_context else context
+        
+        # Use Gemini for more complex questions
         response = await gemini_ai_service.generate_study_response(
             question=user_message,
             subject="general",  # Can be extracted from context later
             difficulty=difficulty,
             user_id="anonymous",
-            context=context
+            context=enhanced_context
         )
         
         return {
@@ -773,6 +1142,7 @@ async def chat_with_tutor(message: dict):
         
     except Exception as e:
         logger.error(f"Tutoring error: {e}")
+        raise HTTPException(status_code=500, detail=f"Tutoring failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Tutoring failed: {str(e)}")
 
 # In-memory storage for quizzes
@@ -808,7 +1178,26 @@ class QuizResult(BaseModel):
 @app.get("/api/quizzes", tags=["Quizzes"])
 async def get_quizzes():
     """Get all generated quizzes"""
+    logger.info(f"📊 Fetching quizzes. Current count: {len(generated_quizzes)}")
+    logger.info(f"📋 Quiz IDs: {list(generated_quizzes.keys())}")
     return {"quizzes": list(generated_quizzes.values())}
+
+@app.get("/api/debug/quiz-status", tags=["Debug"])
+async def debug_quiz_status():
+    """Debug endpoint to check quiz generation status"""
+    return {
+        "total_generated_quizzes": len(generated_quizzes),
+        "quiz_ids": list(generated_quizzes.keys()),
+        "quiz_summaries": [
+            {
+                "id": quiz.get("id"),
+                "title": quiz.get("title"),
+                "source": quiz.get("source"),
+                "question_count": len(quiz.get("questions", []))
+            }
+            for quiz in generated_quizzes.values()
+        ]
+    }
 
 @app.post("/api/quizzes/generate", tags=["Quizzes"])
 async def generate_quiz(request: QuizGenerateRequest):
@@ -832,34 +1221,44 @@ async def generate_quiz(request: QuizGenerateRequest):
     try:
         logger.info(f"Generating quiz with {request.question_count} questions from document: {document['filename']}")
         
-        # Get document content for quiz generation
-        content = document.get('final_summary', '') + "\n\n"
-        if document.get('analysis_results'):
-            for result in document['analysis_results']:
-                content += result.get('summary', '') + "\n"
-                if result.get('key_points'):
-                    content += "\n".join(result['key_points']) + "\n\n"
+        # Get actual document content for quiz generation (prioritize extracted content)
+        content = document.get('content', '')  # Use extracted PDF/text content
+        
+        # Fallback to summary if no content available
+        if not content or len(content.strip()) < 50:
+            content = document.get('final_summary', '') + "\n\n"
+            if document.get('analysis_results'):
+                for result in document['analysis_results']:
+                    content += result.get('summary', '') + "\n"
+                    if result.get('key_points'):
+                        content += "\n".join(result['key_points']) + "\n\n"
+        
+        if not content or len(content.strip()) < 20:
+            raise HTTPException(status_code=400, detail="No content available for quiz generation")
+        
+        logger.info(f"📝 Using content for quiz: {len(content)} characters from {document['filename']}")
         
         # Generate quiz using Gemini AI
         quiz_prompt = f"""
-        Create a comprehensive quiz based on the following educational content. Generate exactly {request.question_count} questions.
+        Create a comprehensive quiz based on the following educational content from "{document['filename']}". Generate exactly {request.question_count} questions.
 
-        Content:
-        {content[:8000]}  # Limit content size
+        DOCUMENT CONTENT:
+        {content[:12000]}  # Increased content size for better context
 
         Requirements:
-        - Generate {request.question_count} questions
+        - Generate {request.question_count} questions directly based on the content above
         - Mix of multiple choice and short answer questions
         - Difficulty: {request.difficulty}
-        - Questions should test understanding, not just memorization
+        - Questions should test understanding of the specific content provided
         - Include detailed explanations for each answer
+        - Ensure questions are relevant to the actual document content
         - Format as JSON with this structure:
         {{
             "questions": [
                 {{
                     "id": 1,
                     "type": "multiple-choice",
-                    "question": "Question text",
+                    "question": "Question text based on the content",
                     "options": ["A", "B", "C", "D"],
                     "correctAnswer": "Correct option text",
                     "explanation": "Why this is correct",
@@ -1009,10 +1408,37 @@ async def get_quiz_results():
 async def get_learning_progress():
     """Get comprehensive learning progress analytics"""
     
-    # Calculate document stats
-    total_documents = len(uploaded_documents)
-    processed_documents = sum(1 for doc in uploaded_documents.values() 
-                             if doc.get('final_summary') or doc.get('processed_pages', 0) > 0)
+    # Calculate document stats using MongoDB
+    total_documents = 0
+    processed_documents = 0
+    
+    # Try to get documents from MongoDB first
+    if get_database:
+        try:
+            db = await get_database()
+            documents_collection = db.documents
+            
+            # Count total documents
+            total_documents = await documents_collection.count_documents({})
+            
+            # Count processed documents (those with content or processed status)
+            processed_documents = await documents_collection.count_documents({
+                "$or": [
+                    {"content": {"$exists": True, "$ne": ""}},
+                    {"final_summary": {"$exists": True, "$ne": ""}},
+                    {"processed_pages": {"$gt": 0}}
+                ]
+            })
+            
+        except Exception as e:
+            logger.error(f"❌ MongoDB read error in learning progress: {e}")
+    
+    # Fallback to in-memory storage if MongoDB fails
+    if total_documents == 0:
+        uploaded_documents = getattr(app.state, 'uploaded_documents', {})
+        total_documents = len(uploaded_documents)
+        processed_documents = sum(1 for doc in uploaded_documents.values() 
+                                 if doc.get('final_summary') or doc.get('processed_pages', 0) > 0)
     
     # Calculate quiz stats
     total_quizzes = len(generated_quizzes)
@@ -1103,6 +1529,35 @@ def get_learning_recommendations(avg_score, processed_docs, total_quizzes):
 async def get_smart_recommendations():
     """Get AI-powered study recommendations based on learning patterns"""
     
+    # Get documents count from MongoDB or memory
+    total_docs = 0
+    processed_docs = 0
+    uploaded_documents = {}
+    
+    # Try to get document stats from MongoDB
+    if get_database:
+        try:
+            db = await get_database()
+            documents_collection = db.documents
+            
+            total_docs = await documents_collection.count_documents({})
+            processed_docs = await documents_collection.count_documents({
+                "$or": [
+                    {"processed": True},
+                    {"content": {"$exists": True, "$ne": ""}},
+                    {"final_summary": {"$exists": True, "$ne": ""}}
+                ]
+            })
+            
+        except Exception as e:
+            logger.error(f"❌ MongoDB read error in recommendations: {e}")
+    
+    # Fallback to in-memory storage
+    if total_docs == 0:
+        uploaded_documents = getattr(app.state, 'uploaded_documents', {})
+        total_docs = len(uploaded_documents)
+        processed_docs = sum(1 for doc in uploaded_documents.values() if doc.get('processed'))
+    
     # Analyze quiz performance patterns
     quiz_performance = []
     topic_strengths = {}
@@ -1190,9 +1645,33 @@ async def get_smart_recommendations():
             "icon": "⏰"
         })
     
-    # Document processing recommendations
-    total_docs = len(uploaded_documents)
-    processed_docs = sum(1 for doc in uploaded_documents.values() if doc.get('processed'))
+    # Document processing recommendations using MongoDB
+    total_docs = 0
+    processed_docs = 0
+    
+    # Try to get document stats from MongoDB
+    if get_database:
+        try:
+            db = await get_database()
+            documents_collection = db.documents
+            
+            total_docs = await documents_collection.count_documents({})
+            processed_docs = await documents_collection.count_documents({
+                "$or": [
+                    {"processed": True},
+                    {"content": {"$exists": True, "$ne": ""}},
+                    {"final_summary": {"$exists": True, "$ne": ""}}
+                ]
+            })
+            
+        except Exception as e:
+            logger.error(f"❌ MongoDB read error in recommendations: {e}")
+    
+    # Fallback to in-memory storage
+    if total_docs == 0:
+        uploaded_documents = getattr(app.state, 'uploaded_documents', {})
+        total_docs = len(uploaded_documents)
+        processed_docs = sum(1 for doc in uploaded_documents.values() if doc.get('processed'))
     
     if total_docs > 0 and processed_docs / total_docs < 0.5:
         recommendations.append({
@@ -1234,7 +1713,7 @@ async def get_smart_recommendations():
             })
     
     # Default recommendations for new users
-    if not quiz_results and not uploaded_documents:
+    if not quiz_results and total_docs == 0:
         recommendations.extend([
             {
                 "type": "getting_started",
@@ -2144,6 +2623,200 @@ async def get_knowledge_gaps(severity: Optional[str] = None):
             "minor": sum(1 for g in knowledge_gaps.values() if g['severity'] == 'minor')
         }
     }
+
+# ==========================================
+# AI STUDY PLANNER ENDPOINTS
+# ==========================================
+
+from services.ai_study_planner import get_ai_study_planner
+
+@app.post("/api/study-planner/create-plan", tags=["AI Study Planner"])
+async def create_personalized_study_plan(
+    plan_request: Dict[str, Any] = {
+        "user_id": "default_user",
+        "available_hours_per_day": 2.0,
+        "learning_goals": [],
+        "current_knowledge": [],
+        "learning_style": "balanced"
+    }
+):
+    """Create a personalized AI-powered study plan"""
+    logger.info(f"🎯 Creating personalized study plan")
+    
+    try:
+        planner = get_ai_study_planner()
+        
+        study_plan = await planner.create_personalized_study_plan(
+            user_id=plan_request.get("user_id", "default_user"),
+            available_hours_per_day=plan_request.get("available_hours_per_day", 2.0),
+            learning_goals=plan_request.get("learning_goals", []),
+            current_knowledge=plan_request.get("current_knowledge", []),
+            learning_style=plan_request.get("learning_style", "balanced"),
+            study_preferences=plan_request.get("study_preferences", {})
+        )
+        
+        return {
+            "success": True,
+            "plan": study_plan,
+            "message": "Personalized study plan created successfully"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error creating study plan: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create study plan: {str(e)}")
+
+@app.post("/api/study-planner/optimize-session", tags=["AI Study Planner"])
+async def optimize_current_session(
+    session_data: Dict[str, Any] = {
+        "user_id": "default_user",
+        "current_energy": 7,
+        "available_time": 60,
+        "subject_preferences": []
+    }
+):
+    """Optimize current study session based on real-time factors"""
+    logger.info(f"⚡ Optimizing study session")
+    
+    try:
+        planner = get_ai_study_planner()
+        
+        optimization = await planner.optimize_study_session(
+            user_id=session_data.get("user_id", "default_user"),
+            current_energy=session_data.get("current_energy", 7),
+            available_time=session_data.get("available_time", 60),
+            subject_preferences=session_data.get("subject_preferences", [])
+        )
+        
+        return {
+            "success": True,
+            "optimization": optimization,
+            "message": "Study session optimized successfully"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error optimizing session: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to optimize session: {str(e)}")
+
+@app.post("/api/study-planner/track-progress", tags=["AI Study Planner"])
+async def track_study_progress(
+    progress_data: Dict[str, Any] = {
+        "user_id": "default_user",
+        "completed_sessions": [],
+        "performance_data": {}
+    }
+):
+    """Track progress and adapt study plan based on performance"""
+    logger.info(f"📊 Tracking study progress")
+    
+    try:
+        planner = get_ai_study_planner()
+        
+        progress_analysis = await planner.track_progress_and_adapt(
+            user_id=progress_data.get("user_id", "default_user"),
+            completed_sessions=progress_data.get("completed_sessions", []),
+            performance_data=progress_data.get("performance_data", {})
+        )
+        
+        return {
+            "success": True,
+            "analysis": progress_analysis,
+            "message": "Progress tracked and plan adapted successfully"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error tracking progress: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to track progress: {str(e)}")
+
+@app.get("/api/study-planner/daily-schedule/{user_id}", tags=["AI Study Planner"])
+async def get_daily_schedule(user_id: str, date: str = None):
+    """Get optimized daily study schedule for a specific date"""
+    logger.info(f"📅 Getting daily schedule for {user_id}")
+    
+    try:
+        # For now, return a sample schedule
+        # In a real implementation, this would fetch from database
+        sample_schedule = {
+            "date": date or datetime.now().date().isoformat(),
+            "user_id": user_id,
+            "sessions": [
+                {
+                    "id": "session_1",
+                    "time": "09:00",
+                    "subject": "Morning Review",
+                    "duration_minutes": 30,
+                    "type": "review",
+                    "difficulty": "easy",
+                    "topics": ["Previous day concepts"],
+                    "energy_requirement": 6
+                },
+                {
+                    "id": "session_2", 
+                    "time": "14:00",
+                    "subject": "Core Learning",
+                    "duration_minutes": 60,
+                    "type": "reading",
+                    "difficulty": "medium",
+                    "topics": ["New concepts", "Key principles"],
+                    "energy_requirement": 8
+                },
+                {
+                    "id": "session_3",
+                    "time": "19:00",
+                    "subject": "Practice & Application",
+                    "duration_minutes": 45,
+                    "type": "practice",
+                    "difficulty": "medium",
+                    "topics": ["Problem solving", "Application exercises"],
+                    "energy_requirement": 7
+                }
+            ],
+            "total_study_time": 135,
+            "difficulty_distribution": {"easy": 30, "medium": 105},
+            "recommendations": [
+                "Take 10-minute breaks between sessions",
+                "Hydrate regularly",
+                "Review yesterday's material before new content"
+            ]
+        }
+        
+        return {
+            "success": True,
+            "schedule": sample_schedule,
+            "message": "Daily schedule retrieved successfully"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting schedule: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get schedule: {str(e)}")
+
+@app.get("/api/study-planner/learning-paths", tags=["AI Study Planner"])
+async def get_learning_paths(subject: str = None, difficulty: str = None):
+    """Get available learning paths based on subject and difficulty"""
+    logger.info(f"🛤️ Getting learning paths for {subject or 'all subjects'}")
+    
+    try:
+        planner = get_ai_study_planner()
+        
+        # Sample learning goals and knowledge for path generation
+        sample_goals = [
+            {"title": subject or "General Study", "description": "Comprehensive learning", "priority": 5}
+        ]
+        sample_knowledge = [
+            {"area": "foundations", "level": difficulty or "beginner"}
+        ]
+        
+        learning_paths = await planner._generate_learning_paths(sample_goals, sample_knowledge)
+        
+        return {
+            "success": True,
+            "paths": learning_paths,
+            "total_paths": len(learning_paths),
+            "message": "Learning paths retrieved successfully"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting learning paths: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get learning paths: {str(e)}")
 
 if __name__ == "__main__":
     uvicorn.run(

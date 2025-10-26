@@ -24,17 +24,20 @@ class GeminiAIService:
     """
     
     def __init__(self):
-        self.api_key = "AIzaSyAGUxdVfPBKPrHbYYeOc6BfxDQ4wtFB-Vw"
+        self.api_key = settings.gemini_api_key or os.getenv('GEMINI_API_KEY', '')
+        
+        if not self.api_key:
+            raise ValueError("Gemini API key not found. Please set GEMINI_API_KEY in environment or .env file")
         
         # Configure the library with API key
         genai.configure(api_key=self.api_key)
         
         # Initialize the model
-        self.model = genai.GenerativeModel('gemini-2.5-flash')
+        self.model = genai.GenerativeModel(settings.gemini_model)
         self.initialized = True  # API-based, no model loading needed
         
         logger.info("🚀 Gemini AI Service initialized with official library!")
-        logger.info(f"✅ Using model: gemini-2.5-flash")
+        logger.info(f"✅ Using model: {settings.gemini_model}")
         
     def is_initialized(self) -> bool:
         """Check if the service is ready"""
@@ -49,16 +52,33 @@ class GeminiAIService:
         try:
             # Create educational prompt with difficulty level
             prompt = f"""
-You are an AI Study Assistant. Help with this {subject or 'general'} question for a {difficulty} level student:
+You are an expert AI Study Assistant with advanced pedagogical training. Your role is to facilitate learning through:
 
+CORE PRINCIPLES:
+- Socratic questioning to guide discovery
+- Adaptive explanations based on student level
+- Evidence-based learning strategies
+- Encouraging critical thinking
+
+Student Level: {difficulty}
+Subject Area: {subject or 'interdisciplinary'}
 Question: {question}
 
-{f"Context: {context}" if context else ""}
+{f"Learning Context: {context}" if context else ""}
 
-Provide a clear, educational explanation suitable for {difficulty} level learning. Adjust your language and depth accordingly:
-- Beginner: Simple language, basic concepts, step-by-step explanations
-- Medium: Moderate complexity, some technical terms with explanations
-- Advanced: In-depth analysis, technical terminology, comprehensive details
+RESPONSE GUIDELINES:
+✓ Start with acknowledgment and validation
+✓ Break down complex concepts into digestible parts
+✓ Use analogies and real-world examples when helpful
+✓ Provide step-by-step guidance for problem-solving
+✓ Include metacognitive prompts ("What do you think happens next?")
+✓ Suggest follow-up questions or practice exercises
+✓ Reference study techniques when appropriate
+✓ End with encouragement and next steps
+
+TONE: Professional yet approachable, patient, encouraging
+LENGTH: Comprehensive but focused (aim for clarity over brevity)
+FORMAT: Use bullet points, numbered steps, or clear sections when helpful
 """
             
             # Generate response using official library
@@ -175,12 +195,17 @@ Make it suitable for study notes and review."""
         """Generate flashcards from educational content"""
         
         logger.info(f"🃏 Generating {num_cards} flashcards for: {filename}")
+        logger.info(f"📝 Processing {len(content)} characters of content")
         
         try:
-            prompt = f"""Create {num_cards} educational flashcards from this content:
+            # Use more content for better flashcard generation (increased from 8000 to 12000)
+            content_to_use = content[:12000] if len(content) > 12000 else content
+            
+            prompt = f"""Create {num_cards} educational flashcards from this document content.
 
+DOCUMENT: {filename}
 CONTENT:
-{content[:8000]}
+{content_to_use}
 
 Generate flashcards in JSON format:
 [
@@ -189,7 +214,13 @@ Generate flashcards in JSON format:
     ...
 ]
 
-Focus on key concepts, definitions, and important facts. Make questions clear and answers concise but complete."""
+Requirements:
+- Focus on key concepts, definitions, and important facts from the actual document content
+- Make questions clear and specific to the document
+- Provide concise but complete answers
+- Cover different sections/topics from the document
+- Include both factual and conceptual questions
+- Ensure questions test understanding, not just memorization"""
             
             response = self.model.generate_content(prompt)
             

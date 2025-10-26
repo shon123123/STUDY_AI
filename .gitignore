@@ -76,4 +76,12 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Next.js
+.next/
+out/
+*.tsbuildinfo
+
+# Model files
+backend/models/models--*/
 STUDY-ASSISTANT-APP/backend/models/models--meta-llama--Llama-3.2-3B-Instruct/blobs/

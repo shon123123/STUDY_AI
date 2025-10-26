@@ -1,670 +1,541 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import Sidebar from '../../components/Sidebar'
-import TopBar from '../../components/TopBar'
+import React, { useState, useEffect } from 'react'
+import Sidebar from '@/components/Sidebar'
+import TopBar from '@/components/TopBar'
 
-const API_BASE_URL = 'http://localhost:8000'
-
-interface StudyGoal {
-  id?: string
-  title: string
-  target_date: string
-  priority: string
-  subject?: string
-  description?: string
+interface StudySession {
+  id: string
+  time: string
+  subject: string
+  duration_minutes: number
+  type: string
+  difficulty: string
+  topics: string[]
+  energy_requirement: number
 }
 
 interface StudyPlan {
-  id: string
-  week_start: string
-  week_end: string
-  daily_tasks: Record<string, any>
-  goals: StudyGoal[]
-  estimated_hours: number
-  completion_rate: number
+  user_id: string
+  plan_created: string
+  analysis: any
+  schedule: any
+  learning_paths: any[]
+  study_strategies: any
+  estimated_completion: string
+  success_probability: number
 }
 
-interface KnowledgeGap {
-  id: string
-  subject: string
-  topic: string
-  severity: string
-  accuracy: number
-  recommended_actions: string[]
-  resources: Array<{type: string, title: string}>
+interface LearningPath {
+  name: string
+  description: string
+  steps: string[]
+  estimated_weeks: number
+  difficulty: string
 }
 
-interface Flashcard {
-  id: string
-  front: string
-  back: string
-  difficulty: number
-  topic: string
-  next_review: string
-  review_count: number
-}
-
-export default function StudyPlannerPage() {
-  const [activeTab, setActiveTab] = useState<'planner' | 'flashcards' | 'gaps'>('planner')
+export default function PlannerPage() {
   const [studyPlan, setStudyPlan] = useState<StudyPlan | null>(null)
-  const [goals, setGoals] = useState<StudyGoal[]>([])
-  const [newGoal, setNewGoal] = useState<StudyGoal>({
-    title: '',
-    target_date: '',
-    priority: 'medium',
-    subject: '',
-    description: ''
-  })
-  const [availableHours, setAvailableHours] = useState(3)
+  const [dailySchedule, setDailySchedule] = useState<StudySession[]>([])
+  const [learningPaths, setLearningPaths] = useState<LearningPath[]>([])
   const [loading, setLoading] = useState(false)
-  const [knowledgeGaps, setKnowledgeGaps] = useState<KnowledgeGap[]>([])
-  const [flashcards, setFlashcards] = useState<Flashcard[]>([])
-  const [currentFlashcard, setCurrentFlashcard] = useState<Flashcard | null>(null)
-  const [showAnswer, setShowAnswer] = useState(false)
-  const [documents, setDocuments] = useState<any[]>([])
+  const [activeTab, setActiveTab] = useState('overview')
+  const [currentEnergy, setCurrentEnergy] = useState(7)
+  const [availableTime, setAvailableTime] = useState(60)
+  const [sessionOptimization, setSessionOptimization] = useState<any>(null)
+
+  const [planSettings, setPlanSettings] = useState({
+    available_hours_per_day: 2.0,
+    learning_style: 'balanced',
+    learning_goals: [
+      { title: 'Master Core Concepts', description: 'Understanding fundamental principles', priority: 5 },
+      { title: 'Practical Application', description: 'Apply knowledge to real scenarios', priority: 4 },
+      { title: 'Advanced Topics', description: 'Explore complex topics', priority: 3 }
+    ],
+    current_knowledge: [
+      { area: 'foundations', level: 'intermediate' },
+      { area: 'applications', level: 'beginner' }
+    ]
+  })
 
   useEffect(() => {
-    loadStudyPlans()
-    loadKnowledgeGaps()
-    loadFlashcards()
-    loadDocuments()
+    loadDailySchedule()
+    loadLearningPaths()
   }, [])
 
-  const loadStudyPlans = async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/study-plans?active_only=true`)
-      if (response.ok) {
-        const data = await response.json()
-        if (data.plans && data.plans.length > 0) {
-          setStudyPlan(data.plans[0])
-        }
-      }
-    } catch (error) {
-      console.error('Failed to load study plans:', error)
-    }
-  }
-
-  const loadKnowledgeGaps = async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/knowledge-gaps`)
-      if (response.ok) {
-        const data = await response.json()
-        setKnowledgeGaps(data.gaps || [])
-      }
-    } catch (error) {
-      console.error('Failed to load knowledge gaps:', error)
-    }
-  }
-
-  const loadFlashcards = async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/flashcards/due`)
-      if (response.ok) {
-        const data = await response.json()
-        setFlashcards(data.flashcards || [])
-        if (data.flashcards && data.flashcards.length > 0) {
-          setCurrentFlashcard(data.flashcards[0])
-        }
-      }
-    } catch (error) {
-      console.error('Failed to load flashcards:', error)
-    }
-  }
-
-  const loadDocuments = async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/documents`)
-      if (response.ok) {
-        const data = await response.json()
-        setDocuments(data.documents || [])
-      }
-    } catch (error) {
-      console.error('Failed to load documents:', error)
-    }
-  }
-
-  const addGoal = () => {
-    if (newGoal.title && newGoal.target_date) {
-      setGoals([...goals, { ...newGoal, id: `goal_${Date.now()}` }])
-      setNewGoal({
-        title: '',
-        target_date: '',
-        priority: 'medium',
-        subject: '',
-        description: ''
-      })
-    }
-  }
-
-  const generateStudyPlan = async () => {
-    if (goals.length === 0) {
-      alert('Please add at least one goal first')
-      return
-    }
-
+  const createStudyPlan = async () => {
     setLoading(true)
     try {
-      const response = await fetch(`${API_BASE_URL}/api/study-plans/generate`, {
+      const response = await fetch('http://localhost:8000/api/study-planner/create-plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          goals: goals,
-          available_hours_per_day: availableHours
+          user_id: 'current_user',
+          ...planSettings
         })
       })
 
       if (response.ok) {
         const data = await response.json()
         setStudyPlan(data.plan)
-        alert('✨ AI-powered study plan generated successfully!')
-      } else {
-        alert('Failed to generate study plan')
       }
     } catch (error) {
-      console.error('Error generating study plan:', error)
-      alert('Failed to generate study plan')
+      console.error('Failed to create study plan:', error)
     } finally {
       setLoading(false)
     }
   }
 
-  const completeTask = async (taskId: string) => {
-    if (!studyPlan) return
-
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/study-plans/${studyPlan.id}/task/${taskId}/complete`,
-        { method: 'PUT' }
-      )
-
-      if (response.ok) {
-        const data = await response.json()
-        // Reload study plan
-        loadStudyPlans()
-        
-        if (data.adjustment_needed) {
-          alert(`⚠️ ${data.suggestion}`)
-        } else {
-          alert('✅ Task completed!')
-        }
-      }
-    } catch (error) {
-      console.error('Error completing task:', error)
-    }
-  }
-
-  const generateFlashcards = async (documentId: string) => {
+  const optimizeSession = async () => {
     setLoading(true)
     try {
-      const response = await fetch(`${API_BASE_URL}/api/flashcards/generate`, {
+      const response = await fetch('http://localhost:8000/api/study-planner/optimize-session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ document_id: documentId, max_cards: 20 })
+        body: JSON.stringify({
+          user_id: 'current_user',
+          current_energy: currentEnergy,
+          available_time: availableTime,
+          subject_preferences: ['AI', 'Programming', 'Data Science']
+        })
       })
 
       if (response.ok) {
         const data = await response.json()
-        alert(`✨ Generated ${data.total} flashcards!`)
-        loadFlashcards()
-      } else {
-        alert('Failed to generate flashcards')
+        setSessionOptimization(data.optimization)
       }
     } catch (error) {
-      console.error('Error generating flashcards:', error)
-      alert('Failed to generate flashcards')
+      console.error('Failed to optimize session:', error)
     } finally {
       setLoading(false)
     }
   }
 
-  const reviewFlashcard = async (confidence: number) => {
-    if (!currentFlashcard) return
-
+  const loadDailySchedule = async () => {
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/flashcards/${currentFlashcard.id}/review`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ confidence })
-        }
-      )
-
-      if (response.ok) {
-        // Move to next card
-        const currentIndex = flashcards.findIndex(c => c.id === currentFlashcard.id)
-        if (currentIndex < flashcards.length - 1) {
-          setCurrentFlashcard(flashcards[currentIndex + 1])
-        } else {
-          setCurrentFlashcard(null)
-          alert('🎉 All flashcards reviewed!')
-        }
-        setShowAnswer(false)
-        loadFlashcards()
-      }
-    } catch (error) {
-      console.error('Error reviewing flashcard:', error)
-    }
-  }
-
-  const analyzeKnowledgeGaps = async () => {
-    setLoading(true)
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/knowledge-gaps/analyze`, {
-        method: 'POST'
-      })
-
+      const response = await fetch(`http://localhost:8000/api/study-planner/daily-schedule/current_user`)
       if (response.ok) {
         const data = await response.json()
-        setKnowledgeGaps(data.gaps || [])
-        alert(`📊 Analyzed performance. Found ${data.total} knowledge gaps.`)
-      } else {
-        alert('Failed to analyze knowledge gaps')
+        setDailySchedule(data.schedule.sessions)
       }
     } catch (error) {
-      console.error('Error analyzing knowledge gaps:', error)
-      alert('Failed to analyze knowledge gaps')
-    } finally {
-      setLoading(false)
+      console.error('Failed to load schedule:', error)
     }
   }
 
-  const getSeverityColor = (severity: string) => {
-    switch (severity) {
-      case 'critical': return 'bg-red-100 text-red-800 border-red-300'
-      case 'moderate': return 'bg-yellow-100 text-yellow-800 border-yellow-300'
-      case 'minor': return 'bg-blue-100 text-blue-800 border-blue-300'
-      default: return 'bg-gray-100 text-gray-800 border-gray-300'
+  const loadLearningPaths = async () => {
+    try {
+      const response = await fetch(`http://localhost:8000/api/study-planner/learning-paths`)
+      if (response.ok) {
+        const data = await response.json()
+        setLearningPaths(data.paths)
+      }
+    } catch (error) {
+      console.error('Failed to load learning paths:', error)
     }
   }
 
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case 'high': return 'bg-red-100 text-red-700'
-      case 'medium': return 'bg-yellow-100 text-yellow-700'
-      case 'low': return 'bg-green-100 text-green-700'
-      default: return 'bg-gray-100 text-gray-700'
+  const getDifficultyColor = (difficulty: string) => {
+    switch (difficulty) {
+      case 'easy': return 'bg-green-500'
+      case 'medium': return 'bg-yellow-500'
+      case 'hard': return 'bg-red-500'
+      default: return 'bg-gray-500'
+    }
+  }
+
+  const getTypeIcon = (type: string) => {
+    switch (type) {
+      case 'reading': return '📖'
+      case 'practice': return '💪'
+      case 'review': return '🔄'
+      case 'quiz': return '❓'
+      case 'flashcards': return '🃏'
+      default: return '📚'
     }
   }
 
   return (
-    <div className="h-screen bg-gray-50 dark:bg-gray-900 transition-colors duration-200 overflow-hidden">
+    <div className="flex h-screen bg-gray-900">
       <Sidebar />
-      <TopBar />
-      
-      <main className="md:pl-64 pt-16 h-full overflow-auto">
-        {/* Info Bar with gradient */}
-        <div className="bg-gradient-to-r from-purple-600 to-indigo-600 dark:from-purple-700 dark:to-indigo-700 text-white px-8 py-3 shadow-lg">
-          <p className="text-sm text-purple-100 dark:text-purple-200">
-            Personalized study plans, smart flashcards, and knowledge gap analysis
-          </p>
-        </div>
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <TopBar title="AI Study Planner" />
+        <main className="flex-1 overflow-y-auto p-6">
+          <div className="max-w-6xl mx-auto">
+            
+            {/* Header */}
+            <div className="mb-8">
+              <h1 className="text-3xl font-bold text-white mb-2">AI-Powered Study Planner</h1>
+              <p className="text-gray-400">Intelligent study scheduling and personalized learning optimization</p>
+            </div>
 
-        {/* Tabs */}
-        <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 transition-colors duration-200">
-          <div className="flex px-8">
-            <button
-              onClick={() => setActiveTab('planner')}
-              className={`px-6 py-3 font-medium border-b-2 transition-colors ${
-                activeTab === 'planner'
-                  ? 'border-purple-600 text-purple-600 dark:text-purple-400'
-                  : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-              }`}
-            >
-              📅 Study Planner
-            </button>
-            <button
-              onClick={() => setActiveTab('flashcards')}
-              className={`px-6 py-3 font-medium border-b-2 transition-colors ${
-                activeTab === 'flashcards'
-                  ? 'border-purple-600 text-purple-600 dark:text-purple-400'
-                  : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-              }`}
-            >
-              🎴 Smart Flashcards ({flashcards.length})
-            </button>
-            <button
-              onClick={() => setActiveTab('gaps')}
-              className={`px-6 py-3 font-medium border-b-2 transition-colors ${
-                activeTab === 'gaps'
-                  ? 'border-purple-600 text-purple-600 dark:text-purple-400'
-                  : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-              }`}
-            >
-              📊 Knowledge Gaps ({knowledgeGaps.length})
-            </button>
-          </div>
-        </div>
-
-        <div className="px-8 py-8">
-          {/* Study Planner Tab */}
-          {activeTab === 'planner' && (
-            <div className="space-y-6">
-              {/* Goals Section */}
-              <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-                <h2 className="text-xl font-bold mb-4 dark:text-white">🎯 Your Goals</h2>
-                
-                {/* Add Goal Form */}
-                <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 mb-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                    <input
-                      type="text"
-                      placeholder="Goal title (e.g., Master Calculus)"
-                      value={newGoal.title}
-                      onChange={(e) => setNewGoal({...newGoal, title: e.target.value})}
-                      className="px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                    />
-                    <input
-                      type="date"
-                      value={newGoal.target_date}
-                      onChange={(e) => setNewGoal({...newGoal, target_date: e.target.value})}
-                      className="px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                    />
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                    <input
-                      type="text"
-                      placeholder="Subject (optional)"
-                      value={newGoal.subject}
-                      onChange={(e) => setNewGoal({...newGoal, subject: e.target.value})}
-                      className="px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                    />
-                    <select
-                      value={newGoal.priority}
-                      onChange={(e) => setNewGoal({...newGoal, priority: e.target.value})}
-                      className="px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                    >
-                      <option value="high">High Priority</option>
-                      <option value="medium">Medium Priority</option>
-                      <option value="low">Low Priority</option>
-                    </select>
-                    <button
-                      onClick={addGoal}
-                      className="bg-purple-600 dark:bg-purple-700 text-white px-6 py-2 rounded-lg hover:bg-purple-700 dark:hover:bg-purple-600 transition-colors"
-                    >
-                      Add Goal
-                    </button>
-                  </div>
-                </div>
-
-                {/* Goals List */}
-                {goals.length > 0 && (
-                  <div className="space-y-2 mb-4">
-                    {goals.map((goal) => (
-                      <div key={goal.id} className="flex items-center justify-between p-3 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium dark:text-white">{goal.title}</span>
-                            <span className={`text-xs px-2 py-1 rounded-full ${getPriorityColor(goal.priority)}`}>
-                              {goal.priority}
-                            </span>
-                          </div>
-                          <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                            {goal.subject && <span>{goal.subject} • </span>}
-                            Due: {new Date(goal.target_date).toLocaleDateString()}
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => setGoals(goals.filter(g => g.id !== goal.id))}
-                          className="text-red-500 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 ml-4"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Study Hours Input */}
-                <div className="flex items-center gap-4 mb-4">
-                  <label className="font-medium dark:text-white">Available study hours per day:</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="12"
-                    value={availableHours}
-                    onChange={(e) => setAvailableHours(parseInt(e.target.value))}
-                    className="w-20 px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-purple-500"
-                  />
-                  <span className="text-gray-600 dark:text-gray-400">hours</span>
-                </div>
-
-                {/* Generate Button */}
+            {/* Tab Navigation */}
+            <div className="flex space-x-1 mb-6 bg-gray-800 p-1 rounded-lg">
+              {[
+                { id: 'overview', label: 'Overview' },
+                { id: 'schedule', label: 'Daily Schedule' },
+                { id: 'optimization', label: 'Session Optimizer' },
+                { id: 'paths', label: 'Learning Paths' },
+                { id: 'analytics', label: 'Analytics' }
+              ].map((tab) => (
                 <button
-                  onClick={generateStudyPlan}
-                  disabled={loading || goals.length === 0}
-                  className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-6 py-3 rounded-lg font-medium hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 transition-all"
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                    activeTab === tab.id
+                      ? 'bg-blue-600 text-white'
+                      : 'text-gray-400 hover:text-white hover:bg-gray-700'
+                  }`}
                 >
-                  {loading ? '⏳ Generating...' : '✨ Generate AI Study Plan'}
+                  {tab.label}
                 </button>
-              </div>
+              ))}
+            </div>
 
-              {/* Study Plan Display */}
-              {studyPlan && (
-                <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-                  <div className="flex items-center justify-between mb-6">
+            {/* Overview Tab */}
+            {activeTab === 'overview' && (
+              <div className="space-y-6">
+                {/* Study Plan Creation */}
+                <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
+                  <h2 className="text-xl font-semibold text-white mb-4">📚 Create Personalized Study Plan</h2>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                     <div>
-                      <h2 className="text-xl font-bold dark:text-white">📚 Your Weekly Study Plan</h2>
-                      <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                        {new Date(studyPlan.week_start).toLocaleDateString()} - {new Date(studyPlan.week_end).toLocaleDateString()}
-                      </p>
+                      <label className="block text-sm font-medium text-gray-300 mb-2">
+                        Available Study Hours Per Day
+                      </label>
+                      <input
+                        type="number"
+                        min="0.5"
+                        max="12"
+                        step="0.5"
+                        value={planSettings.available_hours_per_day}
+                        onChange={(e) => setPlanSettings({
+                          ...planSettings,
+                          available_hours_per_day: parseFloat(e.target.value)
+                        })}
+                        className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
                     </div>
-                    <div className="text-right">
-                      <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">{studyPlan.completion_rate.toFixed(0)}%</div>
-                      <div className="text-sm text-gray-600 dark:text-gray-400">Completed</div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-2">
+                        Learning Style
+                      </label>
+                      <select
+                        value={planSettings.learning_style}
+                        onChange={(e) => setPlanSettings({
+                          ...planSettings,
+                          learning_style: e.target.value
+                        })}
+                        className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="visual">Visual Learner</option>
+                        <option value="auditory">Auditory Learner</option>
+                        <option value="kinesthetic">Kinesthetic Learner</option>
+                        <option value="balanced">Balanced Approach</option>
+                      </select>
                     </div>
                   </div>
 
-                  {/* Daily Tasks */}
-                  <div className="space-y-4">
-                    {Object.entries(studyPlan.daily_tasks).map(([day, dayData]: [string, any]) => (
-                      <div key={day} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-                        <div className="flex items-center justify-between mb-3">
-                          <h3 className="font-bold text-lg dark:text-white">{day}</h3>
-                          <span className="text-sm text-gray-600 dark:text-gray-400">
-                            {dayData.total_hours.toFixed(1)} hours • {dayData.tasks.length} tasks
-                          </span>
+                  <button
+                    onClick={createStudyPlan}
+                    disabled={loading}
+                    className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 text-white px-6 py-3 rounded-lg font-medium transition-colors"
+                  >
+                    {loading ? 'Creating Plan...' : '🧠 Generate AI Study Plan'}
+                  </button>
+                </div>
+
+                {/* Study Plan Results */}
+                {studyPlan && (
+                  <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
+                    <h3 className="text-lg font-semibold text-white mb-4">📋 Your Personalized Study Plan</h3>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                      <div className="bg-gray-700 p-4 rounded-lg">
+                        <div className="text-2xl font-bold text-blue-400">
+                          {Math.round(studyPlan.success_probability * 100)}%
                         </div>
+                        <div className="text-sm text-gray-300">Success Probability</div>
+                      </div>
+                      
+                      <div className="bg-gray-700 p-4 rounded-lg">
+                        <div className="text-2xl font-bold text-green-400">
+                          {studyPlan.analysis?.total_estimated_hours || 40}h
+                        </div>
+                        <div className="text-sm text-gray-300">Total Study Hours</div>
+                      </div>
+                      
+                      <div className="bg-gray-700 p-4 rounded-lg">
+                        <div className="text-2xl font-bold text-purple-400">
+                          {new Date(studyPlan.estimated_completion).toLocaleDateString()}
+                        </div>
+                        <div className="text-sm text-gray-300">Est. Completion</div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div>
+                        <h4 className="font-medium text-white mb-2">🎯 Priority Goals</h4>
                         <div className="space-y-2">
-                          {dayData.tasks.map((task: any) => (
-                            <div
-                              key={task.id}
-                              className={`flex items-start gap-3 p-3 rounded-lg transition-all ${
-                                task.completed ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800' : 'bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700'
-                              }`}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={task.completed}
-                                onChange={() => completeTask(task.id)}
-                                className="mt-1 w-5 h-5 text-purple-600 rounded focus:ring-2 focus:ring-purple-500"
-                              />
-                              <div className="flex-1">
-                                <div className={`font-medium ${task.completed ? 'line-through text-gray-500 dark:text-gray-400' : 'text-gray-900 dark:text-gray-100'}`}>
-                                  {task.title}
-                                </div>
-                                <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                                  {task.subject} • {task.duration_hours} hours • {task.priority} priority
-                                </div>
-                              </div>
+                          {studyPlan.analysis?.priority_goals?.slice(0, 3).map((goal: any, index: number) => (
+                            <div key={index} className="bg-gray-700 p-3 rounded-lg">
+                              <div className="text-white font-medium">{goal.title || goal}</div>
+                              {goal.description && (
+                                <div className="text-gray-400 text-sm">{goal.description}</div>
+                              )}
                             </div>
                           ))}
                         </div>
                       </div>
+
+                      <div>
+                        <h4 className="font-medium text-white mb-2">💡 Key Insights</h4>
+                        <div className="space-y-2">
+                          {studyPlan.analysis?.key_insights?.map((insight: string, index: number) => (
+                            <div key={index} className="text-gray-300 text-sm flex items-start">
+                              <span className="text-yellow-400 mr-2">•</span>
+                              {insight}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Daily Schedule Tab */}
+            {activeTab === 'schedule' && (
+              <div className="space-y-6">
+                <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
+                  <div className="flex justify-between items-center mb-6">
+                    <h2 className="text-xl font-semibold text-white">📅 Today's Study Schedule</h2>
+                    <button
+                      onClick={loadDailySchedule}
+                      className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm"
+                    >
+                      🔄 Refresh Schedule
+                    </button>
+                  </div>
+
+                  <div className="space-y-4">
+                    {dailySchedule.map((session) => (
+                      <div key={session.id} className="bg-gray-700 rounded-lg p-4 border-l-4 border-blue-500">
+                        <div className="flex justify-between items-start mb-2">
+                          <div className="flex items-center space-x-3">
+                            <span className="text-2xl">{getTypeIcon(session.type)}</span>
+                            <div>
+                              <h3 className="font-medium text-white">{session.subject}</h3>
+                              <p className="text-sm text-gray-400">{session.time} • {session.duration_minutes} min</p>
+                            </div>
+                          </div>
+                          
+                          <div className="flex items-center space-x-2">
+                            <span className={`px-2 py-1 rounded-full text-xs font-medium text-white ${getDifficultyColor(session.difficulty)}`}>
+                              {session.difficulty}
+                            </span>
+                            <div className="text-xs text-gray-400">
+                              Energy: {session.energy_requirement}/10
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <div className="text-sm text-gray-300">
+                          <strong>Topics:</strong> {session.topics.join(', ')}
+                        </div>
+                      </div>
                     ))}
                   </div>
                 </div>
-              )}
-            </div>
-          )}
-
-          {/* Flashcards Tab */}
-          {activeTab === 'flashcards' && (
-            <div className="space-y-6">
-              {/* Generate Flashcards */}
-              <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-                <h2 className="text-xl font-bold mb-4 dark:text-white">🎴 Generate Flashcards</h2>
-                <p className="text-gray-600 dark:text-gray-400 mb-4">Select a document to auto-generate flashcards using AI</p>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {documents.map((doc) => (
-                    <button
-                      key={doc.id}
-                      onClick={() => generateFlashcards(doc.id)}
-                      disabled={loading}
-                      className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-700 rounded-lg hover:border-purple-400 dark:hover:border-purple-500 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-all text-left"
-                    >
-                      <div>
-                        <div className="font-medium dark:text-white">{doc.filename}</div>
-                        <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">Generate flashcards</div>
-                      </div>
-                      <span className="text-2xl">📄</span>
-                    </button>
-                  ))}
-                </div>
               </div>
+            )}
 
-              {/* Flashcard Review */}
-              {currentFlashcard ? (
-                <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg border-2 border-purple-200 dark:border-purple-800 p-8">
-                  <div className="text-center mb-6">
-                    <div className="inline-block px-4 py-2 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-full text-sm font-medium mb-4">
-                      {flashcards.findIndex(c => c.id === currentFlashcard.id) + 1} / {flashcards.length}
+            {/* Session Optimizer Tab */}
+            {activeTab === 'optimization' && (
+              <div className="space-y-6">
+                <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
+                  <h2 className="text-xl font-semibold text-white mb-6">⚡ Real-Time Session Optimizer</h2>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-2">
+                        Current Energy Level: {currentEnergy}/10
+                      </label>
+                      <input
+                        type="range"
+                        min="1"
+                        max="10"
+                        value={currentEnergy}
+                        onChange={(e) => setCurrentEnergy(parseInt(e.target.value))}
+                        className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer slider"
+                      />
+                      <div className="flex justify-between text-xs text-gray-400 mt-1">
+                        <span>Low</span>
+                        <span>High</span>
+                      </div>
                     </div>
-                    <div className="text-sm text-gray-600 dark:text-gray-400">
-                      Topic: {currentFlashcard.topic} • Difficulty: {'⭐'.repeat(currentFlashcard.difficulty)}
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-2">
+                        Available Time (minutes)
+                      </label>
+                      <input
+                        type="number"
+                        min="5"
+                        max="240"
+                        step="5"
+                        value={availableTime}
+                        onChange={(e) => setAvailableTime(parseInt(e.target.value))}
+                        className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
                     </div>
                   </div>
 
-                  <div className="min-h-[200px] flex items-center justify-center mb-6">
-                    <div className="text-center">
-                      <div className="text-xl font-bold mb-4 text-gray-900 dark:text-gray-100">
-                        {showAnswer ? currentFlashcard.back : currentFlashcard.front}
-                      </div>
-                      <button
-                        onClick={() => setShowAnswer(!showAnswer)}
-                        className="text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 font-medium"
-                      >
-                        {showAnswer ? '🔄 Show Question' : '👁️ Show Answer'}
-                      </button>
-                    </div>
-                  </div>
+                  <button
+                    onClick={optimizeSession}
+                    disabled={loading}
+                    className="bg-green-600 hover:bg-green-700 disabled:bg-green-800 text-white px-6 py-3 rounded-lg font-medium transition-colors mb-6"
+                  >
+                    {loading ? 'Optimizing...' : '🎯 Optimize My Session'}
+                  </button>
 
-                  {showAnswer && (
-                    <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
-                      <p className="text-center text-gray-600 dark:text-gray-400 mb-4">How well did you know this?</p>
-                      <div className="grid grid-cols-5 gap-2">
-                        {[1, 2, 3, 4, 5].map((confidence) => (
-                          <button
-                            key={confidence}
-                            onClick={() => reviewFlashcard(confidence)}
-                            className="py-3 px-4 bg-gray-100 hover:bg-purple-100 hover:text-purple-700 rounded-lg font-medium transition-colors"
-                          >
-                            {confidence}
-                          </button>
-                        ))}
+                  {sessionOptimization && (
+                    <div className="bg-gray-700 rounded-lg p-4">
+                      <h3 className="font-medium text-white mb-4">📊 Optimization Results</h3>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        <div>
+                          <div className="text-sm text-gray-400">Recommended Activity</div>
+                          <div className="text-white font-medium">{sessionOptimization.recommended_activity}</div>
+                        </div>
+                        
+                        <div>
+                          <div className="text-sm text-gray-400">Target Difficulty</div>
+                          <div className="text-white font-medium">{sessionOptimization.target_difficulty}</div>
+                        </div>
                       </div>
-                      <div className="flex justify-between text-xs text-gray-500 mt-2">
-                        <span>Not at all</span>
-                        <span>Perfectly</span>
+
+                      <div className="space-y-3">
+                        <div>
+                          <div className="text-sm text-gray-400 mb-1">Session Structure</div>
+                          <div className="flex flex-wrap gap-2">
+                            {sessionOptimization.session_structure?.map((step: string, index: number) => (
+                              <span key={index} className="px-3 py-1 bg-blue-600 text-white rounded-full text-sm">
+                                {step}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="text-sm text-gray-400 mb-1">Focus Techniques</div>
+                          <div className="text-gray-300 text-sm">
+                            {sessionOptimization.focus_techniques?.join(' • ')}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   )}
                 </div>
-              ) : (
-                <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-12 text-center">
-                  <div className="text-6xl mb-4">🎉</div>
-                  <h3 className="text-xl font-bold mb-2 dark:text-white">No flashcards due for review!</h3>
-                  <p className="text-gray-600 dark:text-gray-400">Great job! Check back later or generate new flashcards.</p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Knowledge Gaps Tab */}
-          {activeTab === 'gaps' && (
-            <div className="space-y-6">
-              {/* Analyze Button */}
-              <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h2 className="text-xl font-bold mb-2 dark:text-white">📊 Knowledge Gap Analysis</h2>
-                    <p className="text-gray-600 dark:text-gray-400">AI analyzes your quiz performance to identify weak areas</p>
-                  </div>
-                  <button
-                    onClick={analyzeKnowledgeGaps}
-                    disabled={loading}
-                    className="bg-purple-600 dark:bg-purple-700 text-white px-6 py-3 rounded-lg hover:bg-purple-700 dark:hover:bg-purple-600 disabled:opacity-50 transition-colors"
-                  >
-                    {loading ? '⏳ Analyzing...' : '🔍 Analyze Now'}
-                  </button>
-                </div>
               </div>
+            )}
 
-              {/* Knowledge Gaps List */}
-              {knowledgeGaps.length > 0 ? (
-                <div className="space-y-4">
-                  {knowledgeGaps.map((gap) => (
-                    <div
-                      key={gap.id}
-                      className={`bg-white dark:bg-gray-800 rounded-lg shadow-sm border-2 p-6 ${getSeverityColor(gap.severity)}`}
+            {/* Learning Paths Tab */}
+            {activeTab === 'paths' && (
+              <div className="space-y-6">
+                <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
+                  <div className="flex justify-between items-center mb-6">
+                    <h2 className="text-xl font-semibold text-white">🛤️ Personalized Learning Paths</h2>
+                    <button
+                      onClick={loadLearningPaths}
+                      className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm"
                     >
-                      <div className="flex items-start justify-between mb-4">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-2">
-                            <h3 className="text-lg font-bold dark:text-white">{gap.topic}</h3>
-                            <span className={`text-xs px-3 py-1 rounded-full font-medium ${getSeverityColor(gap.severity)}`}>
-                              {gap.severity.toUpperCase()}
-                            </span>
-                          </div>
-                          <p className="text-sm opacity-80 dark:text-gray-300">
-                            {gap.subject} • Accuracy: {gap.accuracy?.toFixed(0)}%
-                          </p>
-                        </div>
-                        <div className="text-4xl">
-                          {gap.severity === 'critical' ? '🔴' : gap.severity === 'moderate' ? '🟡' : '🔵'}
-                        </div>
-                      </div>
+                      🔄 Refresh Paths
+                    </button>
+                  </div>
 
-                      <div className="mb-4">
-                        <h4 className="font-semibold mb-2 dark:text-white">📝 Recommended Actions:</h4>
-                        <ul className="space-y-1">
-                          {gap.recommended_actions.map((action, idx) => (
-                            <li key={idx} className="text-sm flex items-start gap-2 dark:text-gray-300">
-                              <span>•</span>
-                              <span>{action}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-
-                      <div>
-                        <h4 className="font-semibold mb-2 dark:text-white">📚 Resources:</h4>
-                        <div className="flex flex-wrap gap-2">
-                          {gap.resources.map((resource, idx) => (
-                            <div
-                              key={idx}
-                              className="text-sm px-3 py-1 bg-white dark:bg-gray-700 bg-opacity-50 rounded-full dark:text-gray-200"
-                            >
-                              {resource.type === 'video' ? '🎥' : resource.type === 'practice' ? '✍️' : '📖'} {resource.title}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {learningPaths.map((path, index) => (
+                      <div key={index} className="bg-gray-700 rounded-lg p-4 border border-gray-600">
+                        <div className="flex justify-between items-start mb-3">
+                          <h3 className="font-medium text-white">{path.name}</h3>
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium text-white ${getDifficultyColor(path.difficulty)}`}>
+                            {path.difficulty}
+                          </span>
+                        </div>
+                        
+                        <p className="text-gray-300 text-sm mb-3">{path.description}</p>
+                        
+                        <div className="space-y-2 mb-3">
+                          <div className="text-sm text-gray-400">Learning Steps:</div>
+                          {path.steps.map((step, stepIndex) => (
+                            <div key={stepIndex} className="flex items-center text-sm text-gray-300">
+                              <span className="text-blue-400 mr-2">{stepIndex + 1}.</span>
+                              {step}
                             </div>
                           ))}
                         </div>
+                        
+                        <div className="text-xs text-gray-400">
+                          Estimated: {path.estimated_weeks} weeks
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Analytics Tab */}
+            {activeTab === 'analytics' && (
+              <div className="space-y-6">
+                <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
+                  <h2 className="text-xl font-semibold text-white mb-6">📊 Study Analytics</h2>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                    <div className="bg-gray-700 p-4 rounded-lg text-center">
+                      <div className="text-3xl font-bold text-blue-400 mb-2">127</div>
+                      <div className="text-sm text-gray-300">Total Study Hours</div>
+                    </div>
+                    
+                    <div className="bg-gray-700 p-4 rounded-lg text-center">
+                      <div className="text-3xl font-bold text-green-400 mb-2">85%</div>
+                      <div className="text-sm text-gray-300">Goal Completion</div>
+                    </div>
+                    
+                    <div className="bg-gray-700 p-4 rounded-lg text-center">
+                      <div className="text-3xl font-bold text-purple-400 mb-2">7.8</div>
+                      <div className="text-sm text-gray-300">Avg. Performance</div>
+                    </div>
+                  </div>
+
+                  <div className="bg-gray-700 rounded-lg p-4">
+                    <h3 className="font-medium text-white mb-4">📈 Recent Insights</h3>
+                    <div className="space-y-3">
+                      <div className="flex items-start space-x-3">
+                        <span className="text-green-400">✓</span>
+                        <div className="text-gray-300">You're maintaining consistent study habits this week</div>
+                      </div>
+                      <div className="flex items-start space-x-3">
+                        <span className="text-yellow-400">⚠</span>
+                        <div className="text-gray-300">Consider more practice sessions for complex topics</div>
+                      </div>
+                      <div className="flex items-start space-x-3">
+                        <span className="text-blue-400">💡</span>
+                        <div className="text-gray-300">Your peak learning time is 2-4 PM</div>
                       </div>
                     </div>
-                  ))}
+                  </div>
                 </div>
-              ) : (
-                <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-12 text-center">
-                  <div className="text-6xl mb-4">✨</div>
-                  <h3 className="text-xl font-bold mb-2 dark:text-white">No knowledge gaps identified</h3>
-                  <p className="text-gray-600 dark:text-gray-400">Take some quizzes to get personalized analysis!</p>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </main>
+              </div>
+            )}
+
+          </div>
+        </main>
+      </div>
     </div>
   )
 }

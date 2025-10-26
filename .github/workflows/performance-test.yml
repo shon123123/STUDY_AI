@@ -1,0 +1,69 @@
+name: Performance Testing
+
+on:
+  push:
+    branches: [ main ]
+  schedule:
+    # Run performance tests every night at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  performance-test:
+    runs-on: ubuntu-latest
+    name: Performance Testing
+    
+    services:
+      mongodb:
+        image: mongo:7.0
+        env:
+          MONGO_INITDB_ROOT_USERNAME: admin
+          MONGO_INITDB_ROOT_PASSWORD: password123
+        ports:
+          - 27017:27017
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        cd backend
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install locust
+
+    - name: Start backend server
+      run: |
+        cd backend
+        python main.py &
+        sleep 10
+      env:
+        DATABASE_URL: mongodb://admin:password123@localhost:27017/study_ai_test?authSource=admin
+
+    - name: Run load tests with Locust
+      run: |
+        cd backend
+        locust -f ../tests/performance/locustfile.py --host=http://localhost:8000 --users=50 --spawn-rate=5 --run-time=5m --html=performance-report.html --csv=performance
+
+    - name: Run Lighthouse CI
+      uses: treosh/lighthouse-ci-action@v9
+      with:
+        configPath: './lighthouserc.js'
+        uploadArtifacts: true
+        temporaryPublicStorage: true
+
+    - name: Upload performance results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: performance-reports
+        path: |
+          backend/performance-report.html
+          backend/performance_*.csv
+          .lighthouseci/

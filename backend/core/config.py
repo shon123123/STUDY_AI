@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     device: str = "cuda"  # or "cpu"
     model_cache_dir: str = "./data/models"
     
+    # Gemini AI Configuration
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.5-flash"
+    
     # Security
     secret_key: str = "your-super-secret-key-change-in-production"
     algorithm: str = "HS256"
