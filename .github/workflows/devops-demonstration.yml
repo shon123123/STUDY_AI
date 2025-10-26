@@ -23,7 +23,7 @@ on:
 env:
   DEMO_TIMESTAMP: ${{ github.run_number }}
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_NAME: ${{ github.repository_owner }}/study_ai
 
 jobs:
   # ============================================================================
